@@ -39,8 +39,8 @@ risk_beta = -0.1
 
 # Online or Batch
 online = True
-# online = False
-update_buffer = 10 # update actor-critic buffer for offline
+online = False
+update_buffer = 1000 # update actor-critic buffer for offline
 
 # Simulation Epochs
 train_loops = 7 # hundreds of training epochs
