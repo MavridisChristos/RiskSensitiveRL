@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.autograd import Variable
+from torch.distributions import Categorical
 
 import cartpole
 
@@ -29,17 +29,30 @@ plt.close('all')
 
 #%% Hyper-parameters 
 
-# Low D or High D
-# lowD = True
-lowD = False
+# Risk Sensitivity
+risk_objective = 'beta'
+risk_objective = 'betainverse'
+risk_objective = 'sign'
+# risk_objective = 'None'
+risk_beta = -0.1
+# risk = 0
+
+# Online or Batch
+online = True
+# online = False
+update_buffer = 10 # update actor-critic buffer for offline
 
 # Simulation Epochs
-train_loops = 14 # hundreds of training epochs
-test_loops = 3 # hundreds of testing epochs
+train_loops = 7 # hundreds of training epochs
+test_loops = 0 # hundreds of testing epochs
 nepochs = 100
 time_steps = 200 # time horizon for successful epoch
-online = True
-update_buffer = 100 # update actor-critic buffer for offline
+
+# Neural Networks
+multiple_layers = False
+nn_hidden_size = 16
+lr = 0.01
+gammaAC = 0.99
 
 # plot folder
 dfolder = './plots'
@@ -59,20 +72,7 @@ show_animation = False
 save_to_file = False
 
 # random seed
-rs=1
-
-#%% Actor-Critic Parameters 
-
-nn_hidden_size = 256
-learning_rate = 3e-4
-gammaAC = 0.99
-
-if False:
-    gammaSA = 0.9 # RL discount
-    epsilon = 0.2 # for epsilon-Greedy policy 
-    epercent = 0.8 # epsilon = epercent * epsilon
-    aa_init=0.1 # 0.9
-    aa_step = 0.3 # 0.9
+rs=0
 
 #%% Environment Initialization and Random Seeds
 
@@ -81,90 +81,378 @@ env_seed=env.seed(rs)
 env.action_space.np_random.seed(rs)
 np.random.seed(rs)
 random.seed(rs) 
+torch.manual_seed(rs)
+
+state_size = env.observation_space.shape[0]
+action_size = env.action_space.n
 
 #%% RL Model Initializtion
 
-class ActorCritic(nn.Module):
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    def __init__(self, num_inputs, num_actions, nn_hidden_size, learning_rate=3e-4):
-        super(ActorCritic, self).__init__()
-
-        self.num_actions = num_actions
-        self.critic_linear1 = nn.Linear(num_inputs, nn_hidden_size)
-        self.critic_linear2 = nn.Linear(nn_hidden_size, 1)
-
-        self.actor_linear1 = nn.Linear(num_inputs, nn_hidden_size)
-        self.actor_linear2 = nn.Linear(nn_hidden_size, num_actions)
+if multiple_layers:
     
-    def forward(self, state):
+    class Actor(nn.Module):
+        def __init__(self, state_size, action_size, nn_hidden_size):
+            super(Actor, self).__init__()
+            self.state_size = state_size
+            self.action_size = action_size
+            self.linear1 = nn.Linear(self.state_size, 128)
+            self.linear2 = nn.Linear(128, 256)
+            self.linear3 = nn.Linear(256, self.action_size)
+    
+        def forward(self, state):
+            output = F.relu(self.linear1(state))
+            output = F.relu(self.linear2(output))
+            output = self.linear3(output)
+            distribution = Categorical(F.softmax(output, dim=-1))
+            return distribution
+    
+    class Critic(nn.Module):
+        def __init__(self, state_size, action_size, nn_hidden_size):
+            super(Critic, self).__init__()
+            self.state_size = state_size
+            self.action_size = action_size
+            self.linear1 = nn.Linear(self.state_size, 128)
+            self.linear2 = nn.Linear(128, 256)
+            self.linear3 = nn.Linear(256, 1)
+    
+        def forward(self, state):
+            output = F.relu(self.linear1(state))
+            output = F.relu(self.linear2(output))
+            value = self.linear3(output)
+            return value
+
+else:
+    
+    class Actor(nn.Module):
         
-        # critic: linear-relu-linear
-        state = Variable(torch.from_numpy(state).float().unsqueeze(0))
-        value = F.relu(self.critic_linear1(state))
-        value = self.critic_linear2(value)
+        def __init__(self, state_size, action_size, nn_hidden_size):
+            super(Actor, self).__init__()
+    
+            self.state_size = state_size
+            self.action_size = action_size
+            self.hidden_size = nn_hidden_size
+            self.actorlinear1 = nn.Linear(self.state_size, self.hidden_size)
+            self.actorlinear2 = nn.Linear(self.hidden_size, self.action_size)
         
-        # actor: linear-relu-linear-softmax
-        policy = F.relu(self.actor_linear1(state))
-        policy = F.softmax(self.actor_linear2(policy), dim=1)
-
-        return value, policy
-
-num_inputs = env.observation_space.shape[0]
-num_outputs = env.action_space.n
-
-if lowD:
-    num_inputs = 2
+        def forward(self, state):
+            
+            # state = Variable(torch.from_numpy(state).float().unsqueeze(0))
+            policy = self.actorlinear1(state)
+            policy = F.relu(policy)
+            policy = self.actorlinear2(policy)
+            policy = F.softmax(policy, dim=-1)
+            policy = Categorical(policy)
     
-actor_critic = ActorCritic(num_inputs, num_outputs, nn_hidden_size)
-ac_optimizer = optim.Adam(actor_critic.parameters(), lr=learning_rate)
+            return policy
+        
+    class Critic(nn.Module):
+        
+        def __init__(self, state_size, action_size, nn_hidden_size):
+            super(Critic, self).__init__()
+    
+            self.state_size = state_size
+            self.action_size = action_size
+            self.hidden_size = nn_hidden_size
+            self.criticlinear1 = nn.Linear(self.state_size, self.hidden_size)
+            self.criticlinear2 = nn.Linear(self.hidden_size, 1)
+    
+        def forward(self, state):
+            
+            # state = Variable(torch.from_numpy(state).float().unsqueeze(0))
+            value = self.criticlinear1(state)
+            value = F.relu(value)
+            value = self.criticlinear2(value)
+    
+            return value
+    
+actor = Actor(state_size, action_size, nn_hidden_size)
+# actor = Actor(state_size, action_size)
+a_optimizer = optim.Adam(actor.parameters(),lr=lr)
+critic = Critic(state_size, action_size, nn_hidden_size)    
+# critic = Critic(state_size, action_size)    
+c_optimizer = optim.Adam(critic.parameters(),lr=lr)
 
-def update_actor_critic(new_state,rewards,values,log_probs):
-    
-    Qval, _ = actor_critic.forward(new_state)
-    Qval = Qval.detach().numpy()[0,0]
-    # all_rewards.append(np.sum(rewards))
-    
-    # compute Q values
-    Qvals = np.zeros_like(values)
-    for t in reversed(range(len(rewards))):
-        Qval = rewards[t] + gammaAC * Qval
-        Qvals[t] = Qval
+#%% RL Model Update
 
-    #update actor critic
-    values = torch.FloatTensor(values)
-    Qvals = torch.FloatTensor(Qvals)
-    log_probs = torch.stack(log_probs)
+def update_actor_critic(new_state,rewards,values,log_probs,perfect):
     
-    advantage = Qvals - values
-    actor_loss = (-log_probs * advantage).mean()
-    critic_loss = 0.5 * advantage.pow(2).mean()
-    ac_loss = actor_loss + critic_loss
+    if perfect:
+        new_value = critic(new_state)
+        R = new_value 
+    else:
+        R = 0
+        
+    returns = []
+    for step in reversed(range(len(rewards))):
+        R = rewards[step] + gammaAC * R 
+        returns.insert(0, R)
 
-    ac_optimizer.zero_grad()
-    ac_loss.backward()
-    ac_optimizer.step()
+    returns = torch.cat(returns).detach()
+    values = torch.cat(values)
+    log_probs = torch.cat(log_probs)
+
+    if risk_objective == 'beta':
+        advantage = risk_beta*torch.exp(risk_beta*returns) - values
+    elif risk_objective == 'betainverse':
+        advantage = 1/risk_beta*torch.exp(risk_beta*returns) - values
+    elif risk_objective == 'sign':
+        advantage = np.sign(risk_beta)*torch.exp(risk_beta*returns) - values
+    else:
+        advantage = returns - values
+        
+    actor_loss = -(log_probs * advantage.detach()).mean()
+    critic_loss = advantage.pow(2).mean()
+
+    a_optimizer.zero_grad()
+    actor_loss.backward()
+    a_optimizer.step()
     
+    c_optimizer.zero_grad()
+    critic_loss.backward()
+    c_optimizer.step()
     
 def online_update_actor_critic(new_state,rewards,values,log_probs,beta):
     
-    reward = torch.FloatTensor(rewards)
-    value = torch.FloatTensor(values)
-    log_prob = torch.stack(log_probs)
+    reward = torch.cat(rewards).detach()
+    value = torch.cat(values)
+    log_prob = torch.cat(log_probs)
+    new_value = critic(new_state)
     
-    Qval, _ = actor_critic.forward(new_state)
-    
-    advantage = -(torch.exp(reward) + gammaAC * Qval - value)
-    critic_loss = beta * 0.5 * advantage.pow(2).mean()
-    actor_loss = beta * log_prob * advantage
-    ac_loss = actor_loss + critic_loss
+    if risk_objective == 'beta':
+        advantage = -(risk_beta * torch.exp(risk_beta*reward) + gammaAC * new_value - value)
+    if risk_objective == 'betainverse':
+        advantage = -(1/risk_beta * torch.exp(risk_beta*reward) + gammaAC * new_value - value)
+    if risk_objective == 'sign':
+        advantage = -(np.sign(risk_beta) * torch.exp(risk_beta*reward) + gammaAC * new_value - value)
+    else:
+        advantage = -(reward + gammaAC * new_value - value)
+        
+    actor_loss = - beta* (log_prob * advantage.detach()).mean()
+    critic_loss = beta * advantage.pow(2).mean()
 
-    ac_optimizer.zero_grad()
-    ac_loss.backward()
-    ac_optimizer.step()
+    a_optimizer.zero_grad()
+    actor_loss.backward()
+    a_optimizer.step()
+    
+    c_optimizer.zero_grad()
+    critic_loss.backward()
+    c_optimizer.step()
+
+#%% Training Loop
+
+training_all=[]
+training_avg=[]
+training_std=[]
+# for all training loops
+for k in range(train_loops):
+    avg = 0
+    std2 = 0
+    # for nepochs epochs (episodes)
+    for i in range(nepochs):
+        
+        beta = 1
+        log_probs = []
+        values = []
+        rewards = []
+        entropy = 0
+        perfect=True
+  
+        # reset/observe current state
+        state = env.reset()
+        state = torch.FloatTensor(state).to(device)
+        
+        # repeat until failure and up to time_steps
+        for t in range(time_steps):
+            
+            # pick next action
+            value = critic(state)
+            policy = actor(state)
+            action = policy.sample()
+            
+            # observe new state
+            new_state, reward, done, info = env.step(action.cpu().numpy())
+            new_state = torch.FloatTensor(new_state).to(device) 
+            
+            # Update memory for RL model
+            log_prob = policy.log_prob(action).unsqueeze(0)
+            entropy += policy.entropy().mean()
+            values.append(value)
+            rewards.append(torch.tensor([reward], dtype=torch.float, device=device))
+            log_probs.append(log_prob)
+            # perfect = not done
+            
+            # Batch or Online Update
+            if online:
+                online_update_actor_critic(new_state, rewards, values, log_probs, beta)
+                beta = beta*gammaAC
+                log_probs = []
+                values = []
+                rewards = []
+            else:
+                if t>0 and t%update_buffer==0:
+                    perfect = False
+                    update_actor_critic(new_state, rewards, values, log_probs, perfect)
+                    log_probs = []
+                    values = []
+                    rewards = []
+                    
+            state=new_state
+            
+            if done:
+                perfect = False
+                break
+        
+        # Episodic Update
+        if len(rewards)>0:
+            update_actor_critic(new_state, rewards, values, log_probs, perfect)
+        
+        # compute average over time_steps repeats 
+        training_all.append(t+1)
+        avg = avg + 1/(i+1) * (t+1-avg) # = avg * i/(i+1) + (t+1)/(i+1) 
+        if i==0:
+            std2 = (t+1 - avg)**2 
+        else:
+            std2 = (i-1)/i * std2 + 1/(i+1) * (t+1 - avg)**2             
+        
+    # Compute Average number of timesteps
+    training_avg.append(avg)
+    training_std.append(np.sqrt(std2))
+    print(f'{k+1}-th episode: Average timesteps: {avg}')
+        
+    # Visualize Value Function
+    # if lowD and plot_figures:    
+    #     vis_V(actor,critic)
+    #     plt.show()
+
+#%% Testing Loop
+
+# time_steps=1000    
+testing_avg=[]
+avg = 0
+
+for k in range(test_loops):
+
+    for i in range(nepochs):
+        
+        # reset/observe current state
+        state = env.reset()
+        state = torch.FloatTensor(state).to(device)
+        
+        # repeat until failure and up to time_steps
+        for t in range(time_steps):
+            
+            # pick next action
+            value = critic(state)
+            policy = actor(state)
+            action = policy.sample()
+            # policy_np = policy.detach().numpy() 
+            # action = np.argmax(np.squeeze(policy_np))
+            
+            # observe new state
+            new_state, reward, done, info = env.step(action.cpu().numpy())
+            new_state = torch.FloatTensor(new_state).to(device) 
+            
+            state=new_state
+            if done:
+                # print("Episode finished after {} timesteps".format(t+1))
+                break
+        
+        # compute average over 100 repeats    
+        avg = avg + 1/(i+1) * (t+1-avg) # = avg * i/(i+1) + (t+1)/(i+1)   
+        
+    update_once=False
+    testing_avg.append(avg)
+    print(f'Testing: Average timesteps: {avg}.')
+    
+#%% Save results to file 
+
+if save_to_file:    
+
+    my_results = [training_avg, testing_avg]
+               
+    if results_file != '':
+        with open(results_file, mode='wb') as file:
+            pickle.dump(my_results, file) 
+
+#%% Plot Training Curve
+    
+fig = plt.figure(facecolor='white')
+
+plt.title('Training Curve')
+x=np.arange(len(training_all))+1
+y=np.array(training_all)
+plt.plot(x,y,color='b',alpha=0.2)
+x=(np.arange(len(training_avg))+1)*nepochs 
+x=np.insert(x, 0, 1)
+y=np.array(training_avg)
+y=np.insert(y,0,training_all[0])
+plt.plot(x,y, label='Training Average',color='b',linewidth=2)
+plt.xlabel('Number of episodes')
+plt.ylabel('Timesteps')
+plt.legend()
+plt.show()
+
+#%% Plot Training Curve
+    
+# fig = plt.figure(facecolor='white')
+
+# plt.title('Training Curve')
+# x=np.arange(len(training_avg))+1
+# y=np.array(training_avg)
+# sigma=np.array(training_std)
+# plt.plot(x,y, label='Training Averages')
+# plt.fill(np.concatenate([x, x[::-1]]),
+#           np.concatenate([y - 1.9600 * sigma,
+#                         (y + 1.9600 * sigma)[::-1]]),
+#           alpha=.2, fc='b', ec='None', label='95%')
+# # plt.plot(len(training_avg)+np.zeros(len(testing_avg))+1,testing_avg,'r*',
+# #                   label='Testing Averages')
+# plt.xlabel('Hundreds of episodes')
+# plt.ylabel('Average number of timesteps')
+# plt.legend()
+# plt.show()
+    
+#%% Animation
+
+if show_animation:
+    
+    time_steps = 1000
+    avg = 0
+    
+    for i in range(1):
+        
+        state = env.reset()
+            
+        for t in range(time_steps):
+            
+            env.render()
+        
+            time.sleep(0.01)
+                
+            # pick next action
+            value = critic(state)
+            policy = actor(state)
+            action = policy.sample()
+            
+            # observe new state
+            new_state, reward, done, info = env.step(action.cpu().numpy())
+            new_state = torch.FloatTensor(new_state).to(device) 
+            
+            state=new_state
+            if done:
+                print("Episode finished after {} timesteps".format(t+1))
+                break
+        
+        avg = avg + 1/(i+1) * (t+1-avg)
+        
+    print(f'Average Number of timesteps: {avg}')
+    env.close()
 
 #%% Plot Initial State Space
 
-def vis_V(actor_critic):
+def vis_V(actor,critic):
     
     three_D = False
     
@@ -181,7 +469,7 @@ def vis_V(actor_critic):
     for i in range(mesh_points):
         for j in range(mesh_points):
             state = np.array([s2[i],s3[j]])
-            V_plot[i,j],_ = actor_critic.forward(state)
+            V_plot[i,j]= critic(state)
       
     if three_D:
         # create a new figure for plotting 
@@ -212,183 +500,3 @@ def vis_V(actor_critic):
         ax.set_yticks([-1, 0, 1])
         ax.set_yticklabels(y_label_list)
         fig.colorbar(img,shrink=0.3, aspect=5, pad=0.01)
-    
-if lowD and plot_figures:    
-    vis_V(actor_critic=actor_critic)
-    plt.show()
-    
-#%% Training Loop
-
-training_avg=[]
-# for all training loops
-for k in range(train_loops):
-    avg = 0
-    # for nepochs epochs (episodes)
-    for i in range(nepochs):
-        
-        beta = 1
-        log_probs = []
-        values = []
-        rewards = []
-        
-        # reset/observe current state
-        state = env.reset()
-        if lowD:
-            state = state[2:]
-            
-        # repeat until failure and up to time_steps
-        for t in range(time_steps):
-            
-            # pick next action
-            value, policy = actor_critic.forward(state)
-            value = value.detach().numpy()[0,0]
-            policy_np = policy.detach().numpy() 
-            action = np.random.choice(num_outputs, p=np.squeeze(policy_np))
-            log_prob = torch.log(policy.squeeze(0)[action])
-            
-            # observe new state
-            new_state, cost, terminate, info = env.step(action)
-            if lowD:
-                new_state = new_state[2:]
-            
-            # Update memory for RL model
-            rewards.append(cost)
-            values.append(value)
-            log_probs.append(log_prob)
-            
-            if online:
-                online_update_actor_critic(new_state, rewards, values, log_probs, beta)
-                beta = beta*gammaAC
-                log_probs = []
-                values = []
-                rewards = []
-            else:
-                if t%update_buffer==0:
-                    update_actor_critic(new_state, rewards, values, log_probs)
-                    log_probs = []
-                    values = []
-                    rewards = []
-                    
-            state=new_state
-            if terminate:
-                # print("Episode finished after {} timesteps".format(t+1))
-                if len(rewards)>0:
-                    update_actor_critic(new_state, rewards, values, log_probs)
-                break
-        
-        # compute average over time_steps repeats    
-        avg = avg + 1/(i+1) * (t+1-avg) # = avg * i/(i+1) + (t+1)/(i+1)    
-                    
-    # Compute Average number of timesteps
-    training_avg.append(avg)
-    print(f'{k+1}-th episode: Average timesteps: {avg}')
-        
-    # Visualize Value Function
-    if lowD and plot_figures:    
-        vis_V(actor_critic=actor_critic)
-        plt.show()
-
-#%% Testing Loop
-
-time_steps=1000    
-testing_avg=[]
-avg = 0
-
-for k in range(test_loops):
-
-    for i in range(nepochs):
-        
-        # reset/observe current state
-        state = env.reset()
-        if lowD:
-            state = state[2:]
-        # repeat until failure and up to time_steps
-        for t in range(time_steps):
-            
-            # pick next action
-            value, policy = actor_critic.forward(state)
-            value = value.detach().numpy()[0,0]
-            policy_np = policy.detach().numpy() 
-            # action = np.random.choice(num_outputs, p=np.squeeze(policy_np))
-            action = np.argmax(np.squeeze(policy_np))
-            
-            # observe new state
-            new_state, cost, terminate, info = env.step(action)
-            if lowD:
-                new_state = new_state[2:]
-            
-            state=new_state
-            if terminate:
-                # print("Episode finished after {} timesteps".format(t+1))
-                break
-        
-        # compute average over 100 repeats    
-        avg = avg + 1/(i+1) * (t+1-avg) # = avg * i/(i+1) + (t+1)/(i+1)   
-        
-    update_once=False
-    testing_avg.append(avg)
-    print(f'Testing: Average timesteps: {avg}.')
-    
-#%% Save results to file 
-
-if save_to_file:    
-
-    my_results = [training_avg, testing_avg]
-               
-    if results_file != '':
-        with open(results_file, mode='wb') as file:
-            pickle.dump(my_results, file) 
-
-#%% Plot Training Curve
-    
-fig = plt.figure(facecolor='white')
-
-plt.title('Training Curve')
-plt.plot(np.arange(len(training_avg))+1,training_avg, label='Training Averages')
-plt.plot(len(training_avg)+np.zeros(len(testing_avg))+1,testing_avg,'r*',
-                  label='Testing Averages')
-plt.xlabel('Hundreds of episodes')
-plt.ylabel('Average number of timesteps')
-plt.legend()
-plt.show()
-    
-#%% Animation
-
-if show_animation:
-    
-    time_steps = 1000
-    avg = 0
-    
-    for i in range(1):
-        
-        state = env.reset()
-        if lowD:
-            state = state[2:]
-            
-        for t in range(time_steps):
-            
-            env.render()
-        
-            time.sleep(0.01)
-                
-            # pick next action
-            value, policy = actor_critic.forward(state)
-            value = value.detach().numpy()[0,0]
-            policy_np = policy.detach().numpy() 
-            # action = np.random.choice(num_outputs, p=np.squeeze(policy_np))
-            action = np.argmax(np.squeeze(policy_np))
-            
-            # observe new state
-            new_state, cost, terminate, info = env.step(action)
-            if lowD:
-                new_state = new_state[2:]
-            
-            state=new_state
-            if terminate:
-                print("Episode finished after {} timesteps".format(t+1))
-                break
-        
-        avg = avg + 1/(i+1) * (t+1-avg)
-        
-    print(f'Average Number of timesteps: {avg}')
-    env.close()
