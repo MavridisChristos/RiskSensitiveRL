@@ -40,7 +40,14 @@ risk_beta = -0.1
 # Online or Batch
 online = True
 online = False
-update_buffer = 1000 # update actor-critic buffer for offline
+beta00 = 10
+update_buffer = 1001 # update actor-critic buffer for offline
+
+# Baseline
+baseline = True
+baseline = False
+value_approximation = True
+value_approximation = False
 
 # Simulation Epochs
 train_loops = 7 # hundreds of training epochs
@@ -168,69 +175,85 @@ else:
             return value
     
 actor = Actor(state_size, action_size, nn_hidden_size)
-# actor = Actor(state_size, action_size)
 a_optimizer = optim.Adam(actor.parameters(),lr=lr)
 critic = Critic(state_size, action_size, nn_hidden_size)    
-# critic = Critic(state_size, action_size)    
 c_optimizer = optim.Adam(critic.parameters(),lr=lr)
 
 #%% RL Model Update
 
 def update_actor_critic(new_state,rewards,values,log_probs,perfect):
     
-    if perfect:
-        new_value = critic(new_state)
-        R = new_value 
-    else:
-        R = 0
+    log_probs = torch.cat(log_probs)
         
+    R = 0
     returns = []
     for step in reversed(range(len(rewards))):
         R = rewards[step] + gammaAC * R 
         returns.insert(0, R)
-
     returns = torch.cat(returns).detach()
-    values = torch.cat(values)
-    log_probs = torch.cat(log_probs)
 
-    if risk_objective == 'beta':
-        advantage = risk_beta*torch.exp(risk_beta*returns) - values
-    elif risk_objective == 'betainverse':
-        advantage = 1/risk_beta*torch.exp(risk_beta*returns) - values
-    elif risk_objective == 'sign':
-        advantage = np.sign(risk_beta)*torch.exp(risk_beta*returns) - values
+    if baseline or value_approximation:
+        values = torch.cat(values)
     else:
-        advantage = returns - values
+        values = 0
+    if (baseline and perfect) or value_approximation:
+        new_value = critic(new_state).detach()
+    else:
+        new_value = 0
         
-    actor_loss = -(log_probs * advantage.detach()).mean()
-    critic_loss = advantage.pow(2).mean()
+    if risk_objective == 'beta':
+        advantage = risk_beta*torch.exp(risk_beta*returns) + gammaAC * new_value - values
+    elif risk_objective == 'betainverse':
+        advantage = 1/risk_beta*torch.exp(risk_beta*returns) + gammaAC * new_value - values
+    elif risk_objective == 'sign':
+        advantage = np.sign(risk_beta)*torch.exp(risk_beta*returns) + gammaAC * new_value - values
+    else:
+        advantage = returns + gammaAC * new_value - values
+        
+    if value_approximation:
+        actor_loss = -(log_probs * values.detach()).mean()
+        sign = 1
+        if risk_objective=='beta' or risk_objective=='betainverse' or risk_objective=='sign':
+            sign = -np.sign(risk_beta)
+        else:
+            sign = -1
+        critic_loss = sign*advantage.pow(2).mean()
+    else:
+        actor_loss = -(log_probs * advantage.detach()).mean()
+        critic_loss = advantage.pow(2).mean()
 
     a_optimizer.zero_grad()
     actor_loss.backward()
     a_optimizer.step()
     
-    c_optimizer.zero_grad()
-    critic_loss.backward()
-    c_optimizer.step()
+    if baseline or value_approximation:
+        c_optimizer.zero_grad()
+        critic_loss.backward()
+        c_optimizer.step()
     
 def online_update_actor_critic(new_state,rewards,values,log_probs,beta):
     
-    reward = torch.cat(rewards).detach()
-    value = torch.cat(values)
-    log_prob = torch.cat(log_probs)
-    new_value = critic(new_state)
+    returns = torch.cat(rewards).detach()
+    log_probs = torch.cat(log_probs)
+    values = torch.cat(values)
+    new_value = critic(new_state).detach()
     
     if risk_objective == 'beta':
-        advantage = -(risk_beta * torch.exp(risk_beta*reward) + gammaAC * new_value - value)
-    if risk_objective == 'betainverse':
-        advantage = -(1/risk_beta * torch.exp(risk_beta*reward) + gammaAC * new_value - value)
-    if risk_objective == 'sign':
-        advantage = -(np.sign(risk_beta) * torch.exp(risk_beta*reward) + gammaAC * new_value - value)
+        advantage = risk_beta*torch.exp(risk_beta*returns) + gammaAC * new_value - values
+    elif risk_objective == 'betainverse':
+        advantage = 1/risk_beta*torch.exp(risk_beta*returns) + gammaAC * new_value - values
+    elif risk_objective == 'sign':
+        advantage = np.sign(risk_beta)*torch.exp(risk_beta*returns) + gammaAC * new_value - values
     else:
-        advantage = -(reward + gammaAC * new_value - value)
+        advantage = returns + gammaAC * new_value - values
         
-    actor_loss = - beta* (log_prob * advantage.detach()).mean()
-    critic_loss = beta * advantage.pow(2).mean()
+    actor_loss = -beta*(log_probs * values.detach()).mean()
+    sign = 1
+    if risk_objective=='beta' or risk_objective=='betainverse' or risk_objective=='sign':
+        sign = -np.sign(risk_beta)
+    else:
+        sign = -1
+    critic_loss = sign*beta*advantage.pow(2).mean()
 
     a_optimizer.zero_grad()
     actor_loss.backward()
@@ -252,7 +275,8 @@ for k in range(train_loops):
     # for nepochs epochs (episodes)
     for i in range(nepochs):
         
-        beta = 1
+        beta0 = beta00/(i+1)
+        beta0 = beta00
         log_probs = []
         values = []
         rewards = []
@@ -285,8 +309,7 @@ for k in range(train_loops):
             
             # Batch or Online Update
             if online:
-                online_update_actor_critic(new_state, rewards, values, log_probs, beta)
-                beta = beta*gammaAC
+                online_update_actor_critic(new_state, rewards, values, log_probs, beta0*0.99)
                 log_probs = []
                 values = []
                 rewards = []
@@ -383,7 +406,7 @@ fig = plt.figure(facecolor='white')
 plt.title('Training Curve')
 x=np.arange(len(training_all))+1
 y=np.array(training_all)
-plt.plot(x,y,color='b',alpha=0.2)
+plt.plot(x,y,color='b',alpha=0.1)
 x=(np.arange(len(training_avg))+1)*nepochs 
 x=np.insert(x, 0, 1)
 y=np.array(training_avg)
