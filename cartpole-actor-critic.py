@@ -22,8 +22,9 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
-plt.ioff() # turn off interactive mode: only show figures with plt.show()
-plt.close('all')
+
+#plt.ioff() # turn off interactive mode: only show figures with plt.show()
+#plt.close('all')
 
 #%% Hyper-parameters 
 
@@ -59,7 +60,7 @@ def stepsize(lr,n,outer=False):
     return a
 
 # Simulation Epochs
-train_loops = 100 # hundreds of training epochs
+train_loops = 200 # hundreds of training epochs
 test_loops = 20 # hundreds of testing epochs
 nepochs = 10
 time_steps = 200 # time horizon for successful epoch
@@ -95,9 +96,19 @@ rs=1
 #%% Environment Initialization and Random Seeds
 
 if game=='cartpole':
-    import cartpole
-    env = cartpole.CartPoleEnv()
-    # env = gym.make("CartPole-v0")
+    #import cartpole
+    #env = cartpole.CartPoleEnv()
+    #env = gym.make("CartPole-v0")
+    gym.envs.register(
+        id='CartPoleExtraLong-v0',
+        entry_point='gym.envs.classic_control:CartPoleEnv',
+        max_episode_steps=time_steps,
+        )
+    env = gym.make('CartPoleExtraLong-v0')
+    
+    env_ = gym.make('CartPoleExtraLong-v0').unwrapped
+    env_.length = 1.1
+    
 elif game=='acrobot':
     # import acrobot
     # env = acrobot.AcrobotEnv()
@@ -315,6 +326,12 @@ for k in range(train_loops):
 
 #%% Testing Loop
 
+env_seed=env.seed(rs)
+env.action_space.np_random.seed(rs)
+np.random.seed(rs)
+random.seed(rs) 
+torch.manual_seed(rs)
+
 testing_all=[]
 testing_avg=[]
 testing_std=[]
@@ -364,6 +381,64 @@ for k in range(test_loops):
     testing_avg.append(avg)
     testing_std.append(np.sqrt(std2))
     print(f'{(k+1)*nepochs}: Testing Average: {avg:.2f} +- {np.sqrt(std2):.2f}')
+    
+#%% Testing Loop v2
+
+env_seed=env.seed(rs)
+env.action_space.np_random.seed(rs)
+np.random.seed(rs)
+random.seed(rs) 
+torch.manual_seed(rs)
+
+testing_all_=[]
+testing_avg_=[]
+testing_std_=[]
+print('*** Testing2 ***')
+
+# for all testing loops
+for k in range(test_loops):
+    avg_ = 0
+    std2_ = 0
+    
+    # for nepochs epochs (episodes)
+    for i in range(nepochs):
+        
+        score_ = 0
+        
+        # reset/observe current state
+        state_ = env_.reset()
+        state_ = torch.FloatTensor(state_).to(device)
+        
+        # repeat until failure and up to time_steps
+        for t in range(time_steps):
+            
+            # pick next action
+            policy_ = actor(state_)
+            action_ = policy_.sample()
+            
+            # observe new state
+            new_state_, reward_, done_, info_ = env_.step(action_.cpu().numpy())
+            new_state_ = torch.FloatTensor(new_state_).to(device) 
+            score_ += reward_
+            
+            # New State
+            state_=new_state_
+            
+            if done_:
+                break
+        
+        # compute average over time_steps repeats 
+        testing_all_.append(score_)
+        avg_ = avg_ + 1/(i+1) * (score_-avg_) # = avg * i/(i+1) + (t+1)/(i+1) 
+        if i==0:
+            std2_ = (score_ - avg_)**2 
+        else:
+            std2_ = (i-1)/i * std2_ + 1/(i+1) * (score_ - avg_)**2             
+        
+    # Compute Average number of timesteps
+    testing_avg_.append(avg_)
+    testing_std_.append(np.sqrt(std2_))
+    print(f'{(k+1)*nepochs}: Testing Average: {avg_:.2f} +- {np.sqrt(std2_):.2f}')
 
 #%% Plot Training Curve
 
@@ -407,6 +482,24 @@ yfill = np.minimum(yfill,max(testing_all)*np.ones_like(yfill))
 plt.plot(x,y, label='Testing Average',color='r',linewidth=2)
 plt.fill(xfill,yfill,
           alpha=.1, fc='r', ec='None')
+
+x_=len(training_all)+np.arange(len(testing_all_))+1
+y_=np.array(testing_all_)
+plt.plot(x_,y_,color='g',alpha=0.05)
+
+x_=(np.arange(len(testing_avg_))+1)*nepochs + len(training_all)
+x_=np.insert(x_, 0, len(training_all))
+y_=np.array(testing_avg_)
+y_=np.insert(y_,0,testing_avg_[0])
+sigma_ = np.array(testing_std_)
+sigma_ = np.insert(sigma_,0,sigma_[0])
+xfill_ = np.concatenate([x_, x_[::-1]])
+yfill_ = np.concatenate([y_ - sigma_, (y_ + sigma_)[::-1]]) # 1.96
+yfill_ = np.maximum(yfill_,min(testing_all_)*np.ones_like(yfill_))
+yfill_ = np.minimum(yfill_,max(testing_all_)*np.ones_like(yfill_))
+plt.plot(x_,y_, label='Testing Average',color='g',linewidth=2)
+plt.fill(xfill_,yfill_,
+          alpha=.1, fc='g', ec='None')
 
 plt.xlabel('Number of episodes')
 plt.ylabel('Reward')
