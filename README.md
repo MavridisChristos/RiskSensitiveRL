@@ -3,7 +3,7 @@
 > Policy Gradient Algorithms (from REINFORCE to Actor-Critic) for Risk-Sensitive Reinforcement Learning
 
 
-
+![](img/rsrl.png)
 
 ## Contact 
 
