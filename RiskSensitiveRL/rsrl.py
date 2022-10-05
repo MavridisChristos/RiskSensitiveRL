@@ -212,7 +212,7 @@ def train(
     torch.manual_seed(rs)
     
     # Results File Name
-    results_folder = './results/'+game
+    results_folder = '../results/'+game
     os.makedirs(results_folder, exist_ok=True)
     
     def n2t(x,d=2):
