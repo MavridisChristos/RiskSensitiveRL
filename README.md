@@ -1,2 +1,3 @@
-# ExponentialTDLearning
-Exponential TD Learning: A risk-sensitive Reinforcement learning algorithm 
+# Risk-Sensitive Reinforcement Learning
+
+based on exponential of integral criteria associated with robust control.
