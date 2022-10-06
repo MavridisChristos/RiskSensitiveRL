@@ -142,7 +142,7 @@ plt.close('all')
 - rs = 0
     # Random seed used for everything (Gym environment, random, np.random, and torch (NNs))
     # (developer mode)
-- rs2 = 10
+- rs2 = [0,1,2,3,4,5,6,7,8,9]
     # Number of random seeds to average upon after initialization
 
 '''
@@ -176,7 +176,7 @@ def train(
         cut_lr=False, 
         # Random Seed
         rs=4,
-        rs2=10):
+        rs2=[2,3,4,5,6]):
     
 
     #%% Environment Initialization and Random Seeds
@@ -514,7 +514,7 @@ def train(
     training_all1_buffer=[]
     training_all2_buffer=[]
     
-    for r in range(rs2):
+    for r in rs2:
         
         # Fix random seeds
         env.seed(rs)
@@ -610,7 +610,7 @@ def train(
     training_all1_buffer=[]
     training_all2_buffer=[]
     
-    for r in range(rs2):
+    for r in rs2:
     
         # Fix random seeds
         env.seed(rs)
