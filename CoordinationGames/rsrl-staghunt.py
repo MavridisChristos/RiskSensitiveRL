@@ -21,6 +21,7 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+from statistics import mean, stdev
 
 # import gym
 import torch  
@@ -141,6 +142,8 @@ plt.close('all')
 - rs = 0
     # Random seed used for everything (Gym environment, random, np.random, and torch (NNs))
     # (developer mode)
+- rs2 = 10
+    # Number of random seeds to average upon after initialization
 
 '''
 
@@ -152,27 +155,28 @@ def train(
         name = '', 
         game='staghunt',
         # REINFORCE or Actor-Critic 
-        look_ahead = 1, # 0, 1
+        look_ahead = 0, # 0, 1
         baseline = False,
         # Risk-Sensitivity
-        risk_beta1 = 0.01,
-        risk_beta2 = 0.01,
+        risk_beta1 = 0,
+        risk_beta2 = 0,
         risk_objective = 'BETA', 
         gammaAC = 0.99,
         # Training Loops
         train_loops = 1,
         test_loops = 0,
-        nepochs = 50,
+        nepochs = 100,
         time_steps = 200, 
         # Neural Networks and Learning Rate
         nn_actor = [2],
         nn_critic = [2],
         lr = 0.1,
         a_outer = 0.0,
-        a_inner = 0.0, 
+        a_inner = 0.5, 
         cut_lr=False, 
         # Random Seed
-        rs=4):
+        rs=4,
+        rs2=10):
     
 
     #%% Environment Initialization and Random Seeds
@@ -319,15 +323,6 @@ def train(
         else:
             a= lr * 1/(1 + n*a_inner)
         return a
-    
-    actor1 = Actor(state_size, action_size, nn_actor)
-    critic1 = Critic(state_size, action_size, nn_critic)    
-    actor2 = Actor(state_size, action_size, nn_actor)
-    critic2 = Critic(state_size, action_size, nn_critic)    
-    a1_optimizer = optim.Adam(actor1.parameters(),lr=lr)
-    c1_optimizer = optim.Adam(critic1.parameters(),lr=lr)
-    a2_optimizer = optim.Adam(actor2.parameters(),lr=lr)
-    c2_optimizer = optim.Adam(critic2.parameters(),lr=lr)
     
     #%% RL Model Update
         
@@ -513,129 +508,302 @@ def train(
             critic_loss.backward()
             c2_optimizer.step()
     
+    #%% Compute Initial Probabilities
+    
+    training_all_buffer=[]
+    training_all1_buffer=[]
+    training_all2_buffer=[]
+    
+    for r in range(rs2):
+        
+        # Fix random seeds
+        env.seed(rs)
+        np.random.seed(rs)
+        random.seed(rs) 
+        torch.manual_seed(rs)
+        
+        actor1 = Actor(state_size, action_size, nn_actor)
+        critic1 = Critic(state_size, action_size, nn_critic)    
+        actor2 = Actor(state_size, action_size, nn_actor)
+        critic2 = Critic(state_size, action_size, nn_critic)    
+        a1_optimizer = optim.Adam(actor1.parameters(),lr=lr)
+        c1_optimizer = optim.Adam(critic1.parameters(),lr=lr)
+        a2_optimizer = optim.Adam(actor2.parameters(),lr=lr)
+        c2_optimizer = optim.Adam(critic2.parameters(),lr=lr)
+        
+        # Fix random seeds
+        env.seed(r)
+        np.random.seed(r)
+        random.seed(r) 
+        torch.manual_seed(r)
+        
+        training_all=[]
+        training_all1=[]
+        training_all2=[]
+        
+        score1 = 0
+        score2 = 0
+        nash = 0
+        
+        # reset/observe current state
+        state = env.reset()
+        state = torch.FloatTensor(state).to(device)
+    
+        # repeat until failure and up to time_steps
+        for t in range(1*time_steps):
+            
+            # pick next action
+            policy1 = actor1(state)
+            action1 = policy1.sample()
+            policy2 = actor2(state)
+            action2 = policy2.sample()
+            
+            # observe new state
+            new_state,reward1,reward2,done = env.step(action1.cpu().numpy(),action2.cpu().numpy())
+            new_state = torch.FloatTensor(new_state).to(device) 
+            
+            # Update memory for RL model
+            score1 = score1 + 1 if new_state[0]==0 else score1
+            score2 = score2 + 1 if new_state[1]==0 else score2
+            
+            state=new_state
+            
+            success = 1 if reward1+reward2==10 else 0
+            nash += success
+            
+            if done:
+                print("Episode Failed")
+                break
+    
+        # compute average over time_steps repeats 
+        training_all1.append(score1/(1*time_steps))
+        training_all2.append(score2/(1*time_steps))
+        training_all.append(nash/(1*time_steps))
+        
+        training_all1_buffer.append(training_all1)
+        training_all2_buffer.append(training_all2)
+        training_all_buffer.append(training_all)
+    
+    training_all_avg = [mean([s[i] for s in training_all_buffer]) for i in range(len(training_all_buffer[0]))]
+    training_all1_avg = [mean([s[i] for s in training_all1_buffer]) for i in range(len(training_all1_buffer[0]))]
+    training_all2_avg = [mean([s[i] for s in training_all2_buffer]) for i in range(len(training_all2_buffer[0]))]
+    
+    if len(training_all_buffer)>1:
+        training_all_std = [stdev([s[i] for s in training_all_buffer]) for i in range(len(training_all_buffer[0]))]
+        training_all1_std = [stdev([s[i] for s in training_all1_buffer]) for i in range(len(training_all1_buffer[0]))]
+        training_all2_std = [stdev([s[i] for s in training_all2_buffer]) for i in range(len(training_all2_buffer[0]))]
+    else:
+        training_all_std = [0 for i in range(len(training_all_buffer[0]))]
+        training_all1_std = [0 for i in range(len(training_all1_buffer[0]))]
+        training_all2_std = [0 for i in range(len(training_all2_buffer[0]))]
+
+    print(f'0: Agent 1 Stag NE Probability: {training_all1_avg[-1]:.2f}+-{training_all1_std[-1]:.2f}')
+    print(f'0: Agent 2 Stag NE Probability: {training_all2_avg[-1]:.2f}+-{training_all2_std[-1]:.2f}')
+            
     #%% Training Loop
     
-    training_all=[]
-    training_all1=[]
-    training_all2=[]
-    print('*** Training ***')
+    training_all_avg_init = training_all_avg
+    training_all1_avg_init = training_all1_avg
+    training_all2_avg_init = training_all2_avg
     
-    # for all training loops
-    for k in range(train_loops):
+    training_all_buffer=[]
+    training_all1_buffer=[]
+    training_all2_buffer=[]
+    
+    for r in range(rs2):
+    
+        # Fix random seeds
+        env.seed(rs)
+        np.random.seed(rs)
+        random.seed(rs) 
+        torch.manual_seed(rs)
         
-        lr = stepsize(lr, k+1, outer=True)
+        actor1 = Actor(state_size, action_size, nn_actor)
+        critic1 = Critic(state_size, action_size, nn_critic)    
+        actor2 = Actor(state_size, action_size, nn_actor)
+        critic2 = Critic(state_size, action_size, nn_critic)    
+        a1_optimizer = optim.Adam(actor1.parameters(),lr=lr)
+        c1_optimizer = optim.Adam(critic1.parameters(),lr=lr)
+        a2_optimizer = optim.Adam(actor2.parameters(),lr=lr)
+        c2_optimizer = optim.Adam(critic2.parameters(),lr=lr)
         
-        # for nepochs epochs (episodes)
-        for i in range(nepochs):
-            
-            score1 = 0
-            log_probs1 = []
-            values1 = []
-            rewards1 = []
-            score2 = 0
-            log_probs2 = []
-            values2 = []
-            rewards2 = []
-            
-            nash = 0
-            
-            # reset/observe current state
-            state = env.reset()
-            state = torch.FloatTensor(state).to(device)
+        # Fix random seeds
+        env.seed(r)
+        np.random.seed(r)
+        random.seed(r) 
+        torch.manual_seed(r)
         
-            # repeat until failure and up to time_steps
-            for t in range(time_steps):
+        training_all=training_all_avg_init.copy()
+        training_all1=training_all1_avg_init.copy()
+        training_all2=training_all2_avg_init.copy()
+        
+        print(f'*** Training rs={r}***')
+        
+        # for all training loops
+        for k in range(train_loops):
+            
+            lr = stepsize(lr, k+1, outer=True)
+            
+            # for nepochs epochs (episodes)
+            for i in range(nepochs):
                 
-                # pick next action
-                value1 = critic1(state)
-                policy1 = actor1(state)
-                action1 = policy1.sample()
-                value2 = critic2(state)
-                policy2 = actor2(state)
-                action2 = policy2.sample()
+                score1 = 0
+                log_probs1 = []
+                values1 = []
+                rewards1 = []
+                score2 = 0
+                log_probs2 = []
+                values2 = []
+                rewards2 = []
                 
-                # observe new state
-                new_state,reward1,reward2,done = env.step(action1.cpu().numpy(),action2.cpu().numpy())
-                new_state = torch.FloatTensor(new_state).to(device) 
+                nash = 0
                 
-                # Update memory for RL model
-                log_prob1 = policy1.log_prob(action1).unsqueeze(0)
-                values1.append(value1)
-                rewards1.append(torch.tensor([reward1], dtype=torch.float, device=device))
-                log_probs1.append(log_prob1)
-                score1 = score1 + 1 if new_state[0]==0 else score1
-                log_prob2 = policy2.log_prob(action2).unsqueeze(0)
-                values2.append(value2)
-                rewards2.append(torch.tensor([reward2], dtype=torch.float, device=device))
-                log_probs2.append(log_prob2)
-                score2 = score2 + 1 if new_state[1]==0 else score2
+                # reset/observe current state
+                state = env.reset()
+                state = torch.FloatTensor(state).to(device)
+            
+                # repeat until failure and up to time_steps
+                for t in range(time_steps):
+                    
+                    # pick next action
+                    value1 = critic1(state)
+                    policy1 = actor1(state)
+                    action1 = policy1.sample()
+                    value2 = critic2(state)
+                    policy2 = actor2(state)
+                    action2 = policy2.sample()
+                    
+                    # observe new state
+                    new_state,reward1,reward2,done = env.step(action1.cpu().numpy(),action2.cpu().numpy())
+                    new_state = torch.FloatTensor(new_state).to(device) 
+                    
+                    # Update memory for RL model
+                    log_prob1 = policy1.log_prob(action1).unsqueeze(0)
+                    values1.append(value1)
+                    rewards1.append(torch.tensor([reward1], dtype=torch.float, device=device))
+                    log_probs1.append(log_prob1)
+                    score1 = score1 + 1 if new_state[0]==0 else score1
+                    log_prob2 = policy2.log_prob(action2).unsqueeze(0)
+                    values2.append(value2)
+                    rewards2.append(torch.tensor([reward2], dtype=torch.float, device=device))
+                    log_probs2.append(log_prob2)
+                    score2 = score2 + 1 if new_state[1]==0 else score2
+                    
+                    # Batch or Online Update
+                    if t>0 and look_ahead>0 and t%look_ahead==0:
+                        update_actor_critic(new_state,rewards1,rewards2,
+                                            values1,values2,log_probs1,log_probs2,
+                                            stepsize(lr,int((t+1)/look_ahead)), baseline)
+                        log_probs1 = []
+                        values1 = []
+                        rewards1 = []
+                        log_probs2 = []
+                        values2 = []
+                        rewards2 = []
+                            
+                    state=new_state
+                    
+                    success = 1 if reward1+reward2==10 else 0
+                    nash += success
+                    
+                    if done:
+                        print("Episode Failed")
+                        break
                 
-                # Batch or Online Update
-                if t>0 and look_ahead>0 and t%look_ahead==0:
+                if len(rewards1)>0 and look_ahead>0:
                     update_actor_critic(new_state,rewards1,rewards2,
                                         values1,values2,log_probs1,log_probs2,
                                         stepsize(lr,int((t+1)/look_ahead)), baseline)
-                    log_probs1 = []
-                    values1 = []
-                    rewards1 = []
-                    log_probs2 = []
-                    values2 = []
-                    rewards2 = []
-                        
-                state=new_state
-                
-                success = 1 if reward1+reward2==10 else 0
-                nash += success
-                
-                if done:
-                    print("Episode Failed")
-                    break
+                elif len(rewards1)>0 and look_ahead==0:
+                    update_reinforce(new_state,rewards1,rewards2,
+                                        values1,values2,log_probs1,log_probs2,
+                                        stepsize(lr,0), baseline)
+        
+                # compute average over time_steps repeats 
+                training_all1.append(score1/time_steps)
+                training_all2.append(score2/time_steps)
+                training_all.append(nash/time_steps)
             
-            if len(rewards1)>0 and look_ahead>0:
-                update_actor_critic(new_state,rewards1,rewards2,
-                                    values1,values2,log_probs1,log_probs2,
-                                    stepsize(lr,int((t+1)/look_ahead)), baseline)
-            elif len(rewards1)>0 and look_ahead==0:
-                update_reinforce(new_state,rewards1,rewards2,
-                                    values1,values2,log_probs1,log_probs2,
-                                    stepsize(lr,0), baseline)
+                print(f'{(i+1)*time_steps}: Stag-Stag NE Frequency: {training_all[-1]:.2f}')
+        
+        training_all1_buffer.append(training_all1)
+        training_all2_buffer.append(training_all2)
+        training_all_buffer.append(training_all)
     
-            # compute average over time_steps repeats 
-            training_all1.append(score1/time_steps)
-            training_all2.append(score2/time_steps)
-            training_all.append(nash/time_steps)
+    training_all_avg = [mean([s[i] for s in training_all_buffer]) for i in range(len(training_all_buffer[0]))]
+    training_all1_avg = [mean([s[i] for s in training_all1_buffer]) for i in range(len(training_all1_buffer[0]))]
+    training_all2_avg = [mean([s[i] for s in training_all2_buffer]) for i in range(len(training_all2_buffer[0]))]
+    
+    if len(training_all_buffer)>1:
+        training_all_std = [stdev([s[i] for s in training_all_buffer]) for i in range(len(training_all_buffer[0]))]
+        training_all1_std = [stdev([s[i] for s in training_all1_buffer]) for i in range(len(training_all1_buffer[0]))]
+        training_all2_std = [stdev([s[i] for s in training_all2_buffer]) for i in range(len(training_all2_buffer[0]))]
+    else:
+        training_all_std = [0 for i in range(len(training_all_buffer[0]))]
+        training_all1_std = [0 for i in range(len(training_all1_buffer[0]))]
+        training_all2_std = [0 for i in range(len(training_all2_buffer[0]))]
         
-            print(f'{(i+1)*time_steps}: Stag-Stag NE Frequency: {training_all[-1]:.2f}')
-        
+
     #%% Plot Training Curve
     
     # colors = ['r','g','m','y','k','c','pink']
     colors = mcolors.TABLEAU_COLORS
     colors = list(colors.keys())
     
-    fig = plt.figure(facecolor='white')
+    fig = plt.figure(facecolor='white',figsize=(4,3),tight_layout = {'pad': 1})
     
     plt.title(name)
     
-    # x=np.arange(len(training_all))+1
-    # y=np.array(training_all)
-    # plt.plot(x,y,color='b',alpha=0.05)
+    x=np.arange(len(training_all1_avg))
+    y=np.array(training_all1_avg)
+    sigma = np.array(training_all1_std) * 1.96/np.sqrt(len(x))
+    plt.plot(x,y, label='Stag - Agent 1',color=colors[1],marker='o',linewidth=3,markersize=4,alpha=0.9)
+    # sigma = np.insert(sigma,0,sigma[0])
+    xfill = np.concatenate([x, x[::-1]])
+    yfill = np.concatenate([y - sigma, (y + sigma)[::-1]]) # 1.96
+    # yfill = np.maximum(yfill,min(y)*np.ones_like(yfill))
+    # yfill = np.minimum(yfill,max(y)*np.ones_like(yfill))
+    plt.fill(xfill,yfill,alpha=.1, fc=colors[1], ec='None')
     
-    x=np.arange(len(training_all))
-    y=np.array(training_all)
-    plt.plot(x,y, label='Stag-Stag NE',color=colors[0],marker='',linewidth=3,markersize=1)
-    x=np.arange(len(training_all1))
-    y=np.array(training_all1)
-    plt.plot(x,y, label='Stag - Agent 1',color=colors[1],linewidth=2)
-    x=np.arange(len(training_all2))
-    y=np.array(training_all2)
-    plt.plot(x,y, label='Stag - Agent 2',color=colors[2],linewidth=2)
     
-    plt.xlabel('Number of episodes')
-    plt.ylabel('Nash Frequency')
+    x=np.arange(len(training_all2_avg))
+    y=np.array(training_all2_avg)
+    sigma = np.array(training_all2_std) * 1.96/np.sqrt(len(x))
+    plt.plot(x,y, label='Stag - Agent 2',color=colors[2],marker='s',linewidth=3,markersize=4,alpha=0.9)
+    # sigma = np.insert(sigma,0,sigma[0])
+    xfill = np.concatenate([x, x[::-1]])
+    yfill = np.concatenate([y - sigma, (y + sigma)[::-1]]) # 1.96
+    # yfill = np.maximum(yfill,min(y)*np.ones_like(yfill))
+    # yfill = np.minimum(yfill,max(y)*np.ones_like(yfill))
+    plt.fill(xfill,yfill,alpha=.1, fc=colors[2], ec='None')
+    
+    # Plot alpha star
+    x=np.arange(len(training_all_avg))
+    y=np.array([env.alpha_star() for i in training_all_avg])
+    
+    plt.plot(x,y,color='k',linestyle='--', label=r'Risk-Neutral $\alpha^*$', alpha=0.7)
+    
+    if risk_beta1 == risk_beta2 and risk_beta1 != 0:
+        x=np.arange(len(training_all_avg))
+        y=np.array([env.alpha_star(beta=risk_beta1) for i in training_all_avg])
+        plt.plot(x,y,color='r',linestyle='--', label=r'Risk-Sensitive $\alpha^*$', alpha=0.7)
+    
+    x=np.arange(len(training_all_avg))
+    y=np.array(training_all_avg)
+    sigma = np.array(training_all_std) * 1.96/np.sqrt(len(x))
+    plt.plot(x,y, label='Stag-Stag NE',color=colors[0],marker='d',linewidth=3,markersize=4,alpha=0.9)
+    # sigma = np.insert(sigma,0,sigma[0])
+    xfill = np.concatenate([x, x[::-1]])
+    yfill = np.concatenate([y - sigma, (y + sigma)[::-1]]) # 1.96
+    # yfill = np.maximum(yfill,min(y)*np.ones_like(yfill))
+    # yfill = np.minimum(yfill,max(y)*np.ones_like(yfill))
+    plt.fill(xfill,yfill,alpha=.1, fc=colors[0], ec='None')
+    
+    plt.xlabel('Number of episodes',fontsize = 16)
+    plt.ylabel('Nash Frequency',fontsize = 16)
     
     plt.grid(color='gray', linestyle='-', linewidth=1, alpha = 0.1)
-    plt.legend()
+    plt.legend(prop={'size': 10})
     
     plot_file = results_folder+'/'+name+'.png'
     fig.savefig(plot_file, format = 'png')  
@@ -644,16 +812,18 @@ def train(
         
     #%% Save results to file 
         
-    my_results = [training_all1,training_all2]
+    my_results = [training_all1_buffer,training_all2_buffer, training_all_buffer]
            
     results_file = results_folder+'/'+name+'.pkl'
     with open(results_file, mode='wb') as file:
         pickle.dump(my_results, file) 
-        
+    
+    return my_results 
+    
 #%% Run as standalone program
 
 if __name__ == "__main__":
-    train()
+    results = train()
     # train(risk_beta1=0, risk_beta2=0)
     # train(risk_beta1=0.1, risk_beta2=0.1)
     # train(risk_beta1=-0.1, risk_beta2=-0.1)

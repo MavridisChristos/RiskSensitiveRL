@@ -102,6 +102,23 @@ class staghunt():
         
         return self.state
     
+    #%% 
+    def alpha_star(self, beta=0):
+        p = self.payoff.copy()
+        a = p[0][0][1]
+        b = p[0][1][1]
+        c = p[1][0][1]
+        d = p[1][1][1]
+        
+        if beta == 0:
+            return (d-c) / (a+d-b-c)
+        else:
+            return (self.rs(d,beta)-self.rs(c,beta))/(self.rs(a,beta)-self.rs(b,beta)+self.rs(d,beta)-self.rs(c,beta))
+    
+    #%%
+    def rs(self,x,beta=0.01):
+        return np.exp(beta*x)
+    
     #%%
     def seed(self, seed=0):
         np.random.seed(seed)
