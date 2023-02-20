@@ -155,26 +155,26 @@ def train(
         name = '', 
         game='cartpole',
         # REINFORCE or Actor-Critic 
-        look_ahead = 0,
+        look_ahead = 1,
         baseline = False,
         # Risk-Sensitivity
         risk_beta = -0.1,
         risk_objective = 'BETA', 
         gammaAC = 0.99,
         # Training Loops
-        train_loops = 100,
-        test_loops = 50,
+        train_loops = 200,
+        test_loops = 100,
         nepochs = 10,
         time_steps = 200, 
         # Neural Networks and Learning Rate
         nn_actor = [16],
         nn_critic = [16],
-        lr = 0.01,
+        lr = 0.005,
         a_outer = 0.0,
-        a_inner = 0.0, 
+        a_inner = 0.5, 
         cut_lr=False,
         # Model Variations
-        model_var = [round(0.2*(i+1),1) for i in range(10)],
+        model_var = [round(0.2*(i+1),1) for i in range(5)],
         rs=0):
     
     #%% Environment Initialization and Random Seeds
@@ -186,6 +186,7 @@ def train(
             max_episode_steps=time_steps,
             )
         env = gym.make('CartPoleExtraLong-v0')
+        actual_model_var = 0.5
     elif game=='acrobot':
         # env = gym.make("Acrobot-v1")
         gym.envs.register(
@@ -194,7 +195,8 @@ def train(
             max_episode_steps=time_steps
             )
         env = gym.make('AcrobotExtraLong-v0')
-    
+        actual_model_var = 1.0
+        
     def goal(avg):
         if game=='cartpole':
             return avg>199
@@ -362,9 +364,14 @@ def train(
         
         if risk_beta!=0:
             if risk_objective=='BETA':
-                advantage = risk_beta*torch.exp(risk_beta * (returns + gammaAC * new_value)) - values
+                # advantage = risk_beta*torch.exp(risk_beta * (returns + gammaAC * new_value)) - values
+                # advantage = risk_beta*torch.exp(risk_beta * returns + gammaAC * new_value) - values
+                # advantage = risk_beta**(1-gammaAC)*torch.exp(risk_beta * returns + gammaAC * torch.log(torch.pow(new_value,2))/2) - values
+                advantage = risk_beta**(1-gammaAC) * torch.exp(risk_beta * returns + gammaAC * torch.log(torch.relu(new_value))) - values
+                # advantage = risk_beta**(1-gammaAC)*torch.exp(risk_beta * returns) - values
             elif risk_objective=='BETAI':
-                advantage = 1/risk_beta*torch.exp(risk_beta * (returns + gammaAC * new_value)) - values
+                # advantage = risk_beta**(gammaAC-1)*torch.exp(risk_beta * (returns + gammaAC * new_value)) - values
+                advantage = risk_beta**(gammaAC-1) * torch.exp(risk_beta * returns + gammaAC * torch.log(torch.relu(new_value))) - values
             elif risk_objective=='BETAS':
                 advantage = np.sign(risk_beta)*torch.exp(risk_beta * (returns + gammaAC * new_value)) - values
             else:
@@ -373,7 +380,7 @@ def train(
             advantage = (returns + gammaAC * new_value) - values
         
         if risk_beta!=0:
-            sign = -np.sign(risk_beta)
+            sign = -1 #-np.sign(risk_beta)
         else:
             sign = -1
             
@@ -420,7 +427,7 @@ def train(
             advantage = (returns + gammaAC * new_value) - values
         
         if risk_beta!=0:
-            sign = +1 #-np.sign(risk_beta)
+            sign = -1 # +1 #-np.sign(risk_beta)
         else:
             sign = -1
             
@@ -589,13 +596,16 @@ def train(
     colors = mcolors.TABLEAU_COLORS
     colors = list(colors.keys())
     
-    fig = plt.figure(facecolor='white')
+    fig,ax = plt.subplots(facecolor='white',figsize=(7,5),tight_layout = {'pad': 1})
     
     plt.title(name)
     
     # x=np.arange(len(training_all))+1
     # y=np.array(training_all)
     # plt.plot(x,y,color='b',alpha=0.05)
+    
+    ax.tick_params(axis='both', which='major', labelsize=12)
+    ax.tick_params(axis='both', which='minor', labelsize=8)
     
     x=(np.arange(len(training_avg))+1)*nepochs 
     x=np.insert(x, 0, 1)
@@ -607,9 +617,10 @@ def train(
     yfill = np.concatenate([y - sigma, (y + sigma)[::-1]]) # 1.96
     yfill = np.maximum(yfill,min(training_all)*np.ones_like(yfill))
     yfill = np.minimum(yfill,max(training_all)*np.ones_like(yfill))
-    plt.plot(x,y, label='Training',color='k',linewidth=2)
+    plt.plot(x,y, label=f'(l={actual_model_var})',color='k',linewidth=2,alpha=0.7)
     plt.fill(xfill,yfill,
               alpha=.1, fc='k', ec='None')
+    plt.fill_between([x[0],x[-1]],[max(y),max(y)],alpha=0.05,color='k')
     
     for ll in range(len(testing_all)):
     
@@ -629,15 +640,30 @@ def train(
         yfill = np.concatenate([y - sigma, (y + sigma)[::-1]]) # 1.96
         yfill = np.maximum(yfill,min(testing_all[ll])*np.ones_like(yfill))
         yfill = np.minimum(yfill,max(testing_all[ll])*np.ones_like(yfill))
-        plt.plot(x,y, label=f'(l={model_var[ll]})',color=color,linewidth=2)
+        plt.plot(x,y, label=f'(l={model_var[ll]})',color=color,linewidth=2,alpha=0.5)
         plt.fill(xfill,yfill,
                   alpha=.1, fc=color, ec='None')
     
-    plt.xlabel('Number of episodes')
-    plt.ylabel('Reward')
+    plt.fill_between([x[0],x[-1]],[max(y),max(y)],alpha=0.05,color='r')
+    
+    plt.xlabel('Number of episodes', fontsize = 16)
+    plt.ylabel('Reward', fontsize = 16)
+    
+    tp = train_loops/(train_loops+test_loops)
+    plt.text(tp-0.15,.1, 'Training Phase', horizontalalignment='center',verticalalignment='center', fontsize=12,#fontweight='bold',
+             transform = ax.transAxes,bbox=dict(boxstyle="round",
+                   fc=(1., 1.0, 1.0),
+                   ec=(0.1, .1, .1),alpha=0.1
+                   ),alpha=0.7)    
+    
+    plt.text(tp+0.1,.1, 'Testing Phase', horizontalalignment='center',verticalalignment='center', fontsize=12,#fontweight='bold',
+             transform = ax.transAxes,bbox=dict(boxstyle="round",
+                   fc=(1., 1.0, 1.0),
+                   ec=(0.1, .1, .1),alpha=0.1
+                   ),alpha=0.7)
     
     plt.grid(color='gray', linestyle='-', linewidth=1, alpha = 0.1)
-    plt.legend()
+    plt.legend(loc='upper left',prop={'size': 14},framealpha=0.51, borderpad=1)
 
     plot_file = results_folder+'/'+name+'.png'
     fig.savefig(plot_file, format = 'png')  
