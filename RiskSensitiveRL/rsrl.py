@@ -135,7 +135,7 @@ plt.close('all')
 
 ### Model Variations
 
-- model_var = [round(0.2*(i+1),1) for i in range(10)]
+- model_var = [-0.4, -0.2, 0.0, 0.2, 0.4]
     # Testing in environments with different model parameters
     # The changing parameter is pre-specified for each environment but can change (see Testing Loops) 
     # Nominal values: length=0.5 for cartpole, LINK_LENGTH_1=1.0 for acrobot
@@ -162,8 +162,8 @@ def train(
         risk_objective = 'BETA', 
         gammaAC = 0.99,
         # Training Loops
-        train_loops = 200,
-        test_loops = 100,
+        train_loops = 100,
+        test_loops = 10,
         nepochs = 10,
         time_steps = 200, 
         # Neural Networks and Learning Rate
@@ -174,7 +174,7 @@ def train(
         a_inner = 0.5, 
         cut_lr=False,
         # Model Variations
-        model_var = [round(0.2*(i+1),1) for i in range(5)],
+        model_var = [-0.4, -0.2, 0.0, 0.2, 0.4],
         rs=0):
     
     #%% Environment Initialization and Random Seeds
@@ -187,6 +187,8 @@ def train(
             )
         env = gym.make('CartPoleExtraLong-v0')
         actual_model_var = 0.5
+        goal_min = 0
+        goal_max = 200
     elif game=='acrobot':
         # env = gym.make("Acrobot-v1")
         gym.envs.register(
@@ -196,12 +198,14 @@ def train(
             )
         env = gym.make('AcrobotExtraLong-v0')
         actual_model_var = 1.0
+        goal_min = -200
+        goal_max = 0
         
     def goal(avg):
         if game=='cartpole':
-            return avg>199
+            return avg>=goal_max
         elif game=='acrobot':
-            return avg>-100
+            return avg>=-100
         
     state_size = env.observation_space.shape[0]
     action_size = env.action_space.n
@@ -360,18 +364,20 @@ def train(
         returns = torch.cat(returns).detach()
         log_probs = torch.cat(log_probs)
         values = torch.cat(values)
-        new_value = critic(new_state).detach()
+        # new_value = critic(new_state).detach()
+        new_value = critic(new_state)
         
         if risk_beta!=0:
             if risk_objective=='BETA':
                 # advantage = risk_beta*torch.exp(risk_beta * (returns + gammaAC * new_value)) - values
-                # advantage = risk_beta*torch.exp(risk_beta * returns + gammaAC * new_value) - values
-                # advantage = risk_beta**(1-gammaAC)*torch.exp(risk_beta * returns + gammaAC * torch.log(torch.pow(new_value,2))/2) - values
-                advantage = risk_beta**(1-gammaAC) * torch.exp(risk_beta * returns + gammaAC * torch.log(torch.relu(new_value))) - values
+                # advantage = torch.exp(risk_beta * returns + gammaAC * torch.log(new_value)) - values
+                # advantage = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-3+torch.pow(new_value,2))/2) - values
+                advantage = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-3+torch.relu(new_value))) - values
+                # advantage = values
                 # advantage = risk_beta**(1-gammaAC)*torch.exp(risk_beta * returns) - values
             elif risk_objective=='BETAI':
                 # advantage = risk_beta**(gammaAC-1)*torch.exp(risk_beta * (returns + gammaAC * new_value)) - values
-                advantage = risk_beta**(gammaAC-1) * torch.exp(risk_beta * returns + gammaAC * torch.log(torch.relu(new_value))) - values
+                advantage = (risk_beta**(gammaAC-1)).real * torch.exp(risk_beta * returns + gammaAC * torch.log(torch.relu(new_value))) - values
             elif risk_objective=='BETAS':
                 advantage = np.sign(risk_beta)*torch.exp(risk_beta * (returns + gammaAC * new_value)) - values
             else:
@@ -380,17 +386,24 @@ def train(
             advantage = (returns + gammaAC * new_value) - values
         
         if risk_beta!=0:
-            sign = -1 #-np.sign(risk_beta)
+            sign = +1 #-np.sign(risk_beta)
         else:
-            sign = -1
+            sign = +1
             
-        actor_loss = -(log_probs * values.detach()).mean() 
-        
-        # actor_loss = -(log_probs * values.detach()).mean() 
+        if risk_beta!=0:
+            actor_loss = - risk_beta * (log_probs * values.detach()).mean() 
+        else:
+            actor_loss = -(log_probs * values.detach()).mean() 
+            
         a_optimizer.param_groups[0]["lr"] = beta
         a_optimizer.zero_grad()
         actor_loss.backward()
         a_optimizer.step()
+        
+        # print(returns)
+        # print(new_value)
+        # print(torch.relu(new_value))
+        # print(advantage)
         
         critic_loss = sign*advantage.pow(2).mean()
         c_optimizer.param_groups[0]["lr"] = beta
@@ -409,6 +422,7 @@ def train(
         log_probs = torch.cat(log_probs)
         values = torch.cat(values)
         new_value = critic(new_state).detach()
+        # new_value = critic(new_state)
         
         if not baseline:
             values = 0*values
@@ -427,9 +441,9 @@ def train(
             advantage = (returns + gammaAC * new_value) - values
         
         if risk_beta!=0:
-            sign = -1 # +1 #-np.sign(risk_beta)
+            sign = +1 #-np.sign(risk_beta)
         else:
-            sign = -1
+            sign = +1
             
         actor_loss = -(log_probs * advantage.detach()).mean() 
         a_optimizer.param_groups[0]["lr"] = beta
@@ -479,6 +493,8 @@ def train(
                 policy = actor(state)
                 action = policy.sample()
                 
+                # print(value)
+                
                 # observe new state
                 new_state, reward, done, info = env.step(action.cpu().numpy())
                 new_state = torch.FloatTensor(new_state).to(device) 
@@ -489,9 +505,9 @@ def train(
                 rewards.append(torch.tensor([reward], dtype=torch.float, device=device))
                 log_probs.append(log_prob)
                 score+= reward
-                
+
                 # Batch or Online Update
-                if t>0 and look_ahead>0 and t%look_ahead==0:
+                if t>=0 and look_ahead>0 and t%look_ahead==0:
                     update_actor_critic(new_state, rewards, values, log_probs, stepsize(lr,int((t+1)/look_ahead)), baseline)
                     log_probs = []
                     values = []
@@ -501,7 +517,7 @@ def train(
                 
                 if done:
                     break
-            
+
             if len(rewards)>0 and look_ahead>0:
                 update_actor_critic(new_state, rewards, values, log_probs, stepsize(lr,int((t+1)/look_ahead)), baseline)
             elif len(rewards)>0 and look_ahead==0:
@@ -533,10 +549,10 @@ def train(
         
         if game=='cartpole':
             envl = gym.make('CartPoleExtraLong-v0').unwrapped
-            envl.length = ll
+            envl.length = actual_model_var + ll
         elif game=='acrobot':
             envl = gym.make('AcrobotExtraLong-v0').unwrapped
-            envl.LINK_LENGTH_1 = ll
+            envl.LINK_LENGTH_1 = actual_model_var + ll
         _=envl.seed(rs)
         envl.action_space.np_random.seed(rs)
     
@@ -620,7 +636,7 @@ def train(
     plt.plot(x,y, label=f'(l={actual_model_var})',color='k',linewidth=2,alpha=0.7)
     plt.fill(xfill,yfill,
               alpha=.1, fc='k', ec='None')
-    plt.fill_between([x[0],x[-1]],[max(y),max(y)],alpha=0.05,color='k')
+    plt.fill_between([x[0],x[-1]],[goal_max,goal_max],[goal_min,goal_min],alpha=0.05,color='k')
     
     for ll in range(len(testing_all)):
     
@@ -640,11 +656,11 @@ def train(
         yfill = np.concatenate([y - sigma, (y + sigma)[::-1]]) # 1.96
         yfill = np.maximum(yfill,min(testing_all[ll])*np.ones_like(yfill))
         yfill = np.minimum(yfill,max(testing_all[ll])*np.ones_like(yfill))
-        plt.plot(x,y, label=f'(l={model_var[ll]})',color=color,linewidth=2,alpha=0.5)
+        plt.plot(x,y, label=f'(l={actual_model_var + model_var[ll]})',color=color,linewidth=2,alpha=0.5)
         plt.fill(xfill,yfill,
                   alpha=.1, fc=color, ec='None')
     
-    plt.fill_between([x[0],x[-1]],[max(y),max(y)],alpha=0.05,color='r')
+    plt.fill_between([x[0],x[-1]],[goal_max,goal_max],[goal_min,goal_min],alpha=0.05,color='r')
     
     plt.xlabel('Number of episodes', fontsize = 16)
     plt.ylabel('Reward', fontsize = 16)
@@ -681,9 +697,10 @@ def train(
 #%% Run as standalone program
 
 if __name__ == "__main__":
-    train(risk_beta=0)
-    train(risk_beta=0.1)
-    train(risk_beta=-0.1)
+    # train(risk_beta=0)
+    # train(risk_beta=0.01)
+    # train(risk_beta=-0.01)
+    train()
     
 #%%
 
