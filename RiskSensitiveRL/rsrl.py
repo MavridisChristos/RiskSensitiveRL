@@ -249,9 +249,10 @@ def train(
             return ''
      
     if name=='':
-        name = 'LA'+n2t(look_ahead)+b2t(baseline,'BL')+'-'+risk_objective+n2t(risk_beta*100,3)+'-NN'+n2t(np.sum(nn_actor),3)+n2t(np.sum(nn_critic),3)+'/'+ \
-                'LR'+b2t(cut_lr,'CUT')+n2t(lr*10000,4)+'-Ao'+n2t(a_outer*100,2)+'-Ai'+n2t(a_inner*100,2)+'-RS'+n2t(rs,2)
-        os.makedirs(results_folder+'/'+'LA'+n2t(look_ahead)+b2t(baseline,'BL')+'-'+risk_objective+n2t(risk_beta*100,3)+'-NN'+n2t(np.sum(nn_actor),3)+n2t(np.sum(nn_critic),3), exist_ok=True)
+        folder_name = 'LA'+n2t(look_ahead)+b2t(baseline,'BL')+'-'+risk_objective+n2t(risk_beta*1000,4)+'-NN'+n2t(np.sum(nn_actor),3)+n2t(np.sum(nn_critic),3)+'/'+ \
+                'LR'+b2t(cut_lr,'CUT')+n2t(lr*10000,4)+'-Ao'+n2t(a_outer*100,2)+'-Ai'+n2t(a_inner*100,2)
+        name=folder_name+'/'+'RS'+n2t(rs,2)
+        os.makedirs(results_folder+'/'+folder_name, exist_ok=True)
     
     #%% RL Model Initializtion
     
