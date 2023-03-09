@@ -181,7 +181,7 @@ def train(
         # Model Variations
         model_var = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3],
         verbose = 1,
-        rs=43):
+        rs=0):
 
     #%% Environment Initialization and Random Seeds
     
