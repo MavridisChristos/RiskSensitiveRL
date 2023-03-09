@@ -139,6 +139,11 @@ plt.close('all')
     # Testing in environments with different model parameters
     # The changing parameter is pre-specified for each environment but can change (see Testing Loops) 
     # Nominal values: length=0.5 for cartpole, LINK_LENGTH_1=1.0 for acrobot
+
+### Verbose = 1
+
+- verbose = 1
+    # Print training/testing averages and plot figures
     
 ### Random Seed
 
@@ -158,24 +163,25 @@ def train(
         look_ahead = 1,
         baseline = False,
         # Risk-Sensitivity
-        risk_beta = -0.01,
-        risk_objective = 'BETA', 
+        risk_beta = 0,
+        risk_objective = 'BETAI', 
         gammaAC = 0.99,
         # Training Loops
-        train_loops = 100,
-        test_loops = 10,
+        train_loops = 150,
+        test_loops = 50,
         nepochs = 10,
         time_steps = 200, 
         # Neural Networks and Learning Rate
-        nn_actor = [4,4],
-        nn_critic = [4,4],
+        nn_actor = [16],
+        nn_critic = [16],
         lr = 0.0007,
         a_outer = 0.0,
         a_inner = 0.0, 
         cut_lr=False,
         # Model Variations
         model_var = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3],
-        rs=0):
+        verbose = 1,
+        rs=43):
 
     #%% Environment Initialization and Random Seeds
     
@@ -244,7 +250,7 @@ def train(
      
     if name=='':
         name = 'LA'+n2t(look_ahead)+b2t(baseline,'BL')+'-'+risk_objective+n2t(risk_beta*100,3)+'-NN'+n2t(np.sum(nn_actor),3)+n2t(np.sum(nn_critic),3)+'/'+ \
-                'LR'+b2t(cut_lr,'CUT')+n2t(lr*10000,4)+'-Ao'+n2t(a_outer*100,2)+'-Ai'+n2t(a_inner*100,2)
+                'LR'+b2t(cut_lr,'CUT')+n2t(lr*10000,4)+'-Ao'+n2t(a_outer*100,2)+'-Ai'+n2t(a_inner*100,2)+'-RS'+n2t(rs,2)
         os.makedirs(results_folder+'/'+'LA'+n2t(look_ahead)+b2t(baseline,'BL')+'-'+risk_objective+n2t(risk_beta*100,3)+'-NN'+n2t(np.sum(nn_actor),3)+n2t(np.sum(nn_critic),3), exist_ok=True)
     
     #%% RL Model Initializtion
@@ -380,19 +386,29 @@ def train(
             
         if risk_beta!=0:
             if risk_objective=='BETA':
-                advantage = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value))) - values
+                advantage_critic = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value))) - values
+                # advantage_actor = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value))) - values
+                # advantage_actor = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value)) + \
+                #                         np.log(np.abs(risk_beta))*(1-gammaAC)) - risk_beta*values
+                advantage_actor = advantage_critic * np.abs(risk_beta)
             elif risk_objective=='BETAI':
-                advantage = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value))) - values
-                # advantage = np.sign(risk_beta)*torch.exp(risk_beta * returns + np.sign(risk_beta)*gammaAC * torch.log(1e-15+torch.relu(new_value)) + \
-                                        # np.log(np.abs(risk_beta))*np.sign(risk_beta)*(1-gammaAC)) - values
+                advantage_critic = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value))) - values
+                # advantage_actor = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value))) - values
+                # advantage_actor = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value)) + \
+                #                         np.log(np.abs(risk_beta))*(gammaAC-1)) - 1/risk_beta*values
+                advantage_actor = advantage_critic * 1/np.abs(risk_beta)
             elif risk_objective=='BETAS':
-                advantage = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value))) - values
+                advantage_critic = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value))) - values
+                # advantage_actor = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value))) - values
+                advantage_actor = advantage_critic
             else:
-                advantage = (returns + gammaAC * new_value) - values
+                advantage_critic = (returns + gammaAC * new_value) - values
+                advantage_actor = (returns + gammaAC * new_value) - values
         else:
-            advantage = (returns + gammaAC * new_value) - values
+            advantage_critic = (returns + gammaAC * new_value) - values
+            advantage_actor = (returns + gammaAC * new_value) - values
             
-        actor_loss = - gammaAC**t * (log_probs * advantage.detach()).mean() 
+        actor_loss = - gammaAC**t * (log_probs * advantage_actor.detach()).mean() 
             
         a_optimizer.param_groups[0]["lr"] = beta
         a_optimizer.zero_grad()
@@ -400,14 +416,14 @@ def train(
         a_optimizer.step()
         wa.append(actor_loss.item())
         
-        critic_loss = gammaAC**t * advantage.pow(2).mean()
+        critic_loss = gammaAC**t * advantage_critic.pow(2).mean()
         
         c_optimizer.param_groups[0]["lr"] = beta
         c_optimizer.zero_grad()
         critic_loss.backward()
         c_optimizer.step()
         wc.append(critic_loss.item())
-            
+        
     def update_reinforce(new_state,rewards,values,log_probs,beta,baseline):
         
         R = 0
@@ -454,10 +470,13 @@ def train(
     
     #%% Training Loop
     
+    print(f'Process Started: {name}')
+    
     training_all=[]
     training_avg=[]
     training_std=[]
-    print('*** Training ***')
+    if verbose>0:
+        print('*** Training ***')
     
     # for all training loops
     for k in range(train_loops):
@@ -529,7 +548,8 @@ def train(
         # Compute Average number of timesteps
         training_avg.append(avg)
         training_std.append(np.sqrt(std2))
-        print(f'{(k+1)*nepochs}: Training Average: {avg:.2f} +- {np.sqrt(std2):.2f}')
+        if verbose>0:
+            print(f'{(k+1)*nepochs}: Training Average: {avg:.2f} +- {np.sqrt(std2):.2f}')
     
     #%% Testing Loop
     
@@ -551,7 +571,8 @@ def train(
         testing_all.append([])
         testing_avg.append([])
         testing_std.append([])
-        print('*** Testing ***')
+        if verbose>0:
+            print('*** Testing ***')
         
         # for all testing loops
         for k in range(test_loops):
@@ -596,7 +617,8 @@ def train(
             # Compute Average number of timesteps
             testing_avg[-1].append(avg)
             testing_std[-1].append(np.sqrt(std2))
-            print(f'{(k+1)*nepochs}: Testing Average: {avg:.2f} +- {np.sqrt(std2):.2f}')
+            if verbose>0:
+                print(f'{(k+1)*nepochs}: Testing Average: {avg:.2f} +- {np.sqrt(std2):.2f}')
     
     #%% Plot Training Curve
     
@@ -619,7 +641,9 @@ def train(
     plot_file = results_folder+'/'+name+'-error.png'
     fig.savefig(plot_file, format = 'png')  
     
-    plt.show()
+    if verbose>0:
+        plt.show()
+    plt.close()
     
     #%% Plot Training Results
     
@@ -699,7 +723,9 @@ def train(
     plot_file = results_folder+'/'+name+'.png'
     fig.savefig(plot_file, format = 'png')  
     
-    plt.show()
+    if verbose>0:
+        plt.show()
+    plt.close()
         
     #%% Save results to file 
         
@@ -709,8 +735,10 @@ def train(
     with open(results_file, mode='wb') as file:
         pickle.dump(my_results, file) 
 
+    print(f'Process Ended: {name}')
+    
     return my_results
-
+    
 #%% Run as standalone program
 
 if __name__ == "__main__":
