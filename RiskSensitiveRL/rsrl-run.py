@@ -12,38 +12,39 @@
 
 from rsrl import train
 import multiprocessing
+
+#%% Hyper parameters
+
+risk_betas = [0,0.001,-0.001,0.005,-0.005,0.01,-0.01,0.05,-0.05]
+learning_rates = [0.00005,0.00008, 0.0001,0.0003,0.0005,0.00007,0.001]
+b = 0
+random_seeds = [b+0,b+1,b+2,b+3,b+4,b+5,b+6,b+7,b+8,b+9]
  
-#%% Run as standalone program
+#%% 
 
 def run_all_seeds(
-                # Name and Game
-                name = '', 
-                game='cartpole',
-                # REINFORCE or Actor-Critic 
-                look_ahead = 1,
-                baseline = False,
-                # Risk-Sensitivity
-                risk_beta = 0,
-                risk_objective = 'BETAI', 
-                gammaAC = 0.99,
-                # Training Loops
-                train_loops = 150,
-                test_loops = 50,
-                nepochs = 10,
-                time_steps = 200, 
-                # Neural Networks and Learning Rate
-                nn_actor = [16],
-                nn_critic = [16],
-                lr = 0.0007,
-                a_outer = 0.0,
-                a_inner = 0.0, 
-                cut_lr=False,
-                # Model Variations
-                model_var = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3],
-                verbose = 0,
-                rs=0):
+                name, 
+                game,
+                look_ahead,
+                baseline,
+                risk_beta,
+                risk_objective, 
+                gammaAC,
+                train_loops,
+                test_loops,
+                nepochs,
+                time_steps, 
+                nn_actor,
+                nn_critic,
+                lr,
+                a_outer,
+                a_inner, 
+                cut_lr,
+                model_var,
+                verbose,
+                rs):
     
-    for rs in [0,1,2,3,4,5,6,7,8,9]:
+    for rs in random_seeds:
         
         train(
             name, 
@@ -68,13 +69,10 @@ def run_all_seeds(
             rs
             )
 
+#%% Main
 
 if __name__ == "__main__":
 
-    # training_all, testing_all, wa, wc = train()
-    
-    # Default Parameters
-    
     # Name and Game
     name = '' 
     game='cartpole'
@@ -83,28 +81,28 @@ if __name__ == "__main__":
     baseline = False
     # Risk-Sensitivity
     risk_beta = 0
-    risk_objective = 'BETAI' 
+    risk_objective = 'BETA' 
     gammaAC = 0.99
     # Training Loops
-    train_loops = 150
-    test_loops = 50
+    train_loops = 200
+    test_loops = 100
     nepochs = 10
     time_steps = 200 
     # Neural Networks and Learning Rate
     nn_actor = [16]
     nn_critic = [16]
-    lr = 0.0007
+    lr = 0.00007
     a_outer = 0.0
     a_inner = 0.0 
     cut_lr=False
     # Model Variations
     model_var = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3]
     verbose = 0
-    rs=0
+    rs=42
     
     p=[]
-    for risk_beta in [0,0.001,-0.001,0.005,-0.005,0.01,-0.01,0.05,-0.05]:
-        for lr in [0.0001,0.0003,0.0005,0.0007,0.001,0.005,0.01]:
+    for risk_beta in risk_betas:
+        for lr in learning_rates:
             p.append(multiprocessing.Process(target=run_all_seeds, args=(
                                                                     name, 
                                                                     game,
@@ -131,8 +129,10 @@ if __name__ == "__main__":
                     )
             p[-1].start()
             print(f'Process #{len(p)} started.')
+    
     # for pp in p:
     #     pp.join()
+    print('Parent Process Terminated.')
     
 #%%
 

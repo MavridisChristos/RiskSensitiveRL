@@ -163,11 +163,11 @@ def train(
         look_ahead = 1,
         baseline = False,
         # Risk-Sensitivity
-        risk_beta = 0,
-        risk_objective = 'BETAI', 
+        risk_beta = -0.01,
+        risk_objective = 'BETA', 
         gammaAC = 0.99,
         # Training Loops
-        train_loops = 150,
+        train_loops = 200,
         test_loops = 50,
         nepochs = 10,
         time_steps = 200, 
@@ -186,25 +186,14 @@ def train(
     #%% Environment Initialization and Random Seeds
     
     if game=='cartpole':
-        gym.envs.register(
-            id='CartPoleExtraLong-v0',
-            entry_point='gym.envs.classic_control:CartPoleEnv',
-            max_episode_steps=time_steps,
-            )
-        env = gym.make('CartPoleExtraLong-v0')
-        actual_model_var = 0.5
+        env = gym.make('CartPole-v1')
+        actual_model_var = env.length
         goal_min = 0
         goal_max = time_steps
     elif game=='acrobot':
-        # env = gym.make("Acrobot-v1")
-        gym.envs.register(
-            id='AcrobotExtraLong-v0',
-            entry_point='gym.envs.classic_control:AcrobotEnv',
-            max_episode_steps=time_steps
-            )
-        env = gym.make('AcrobotExtraLong-v0')
-        actual_model_var = 1.0
-        goal_min = -200
+        env = gym.make('Acrobot-v1')
+        actual_model_var = env.LINK_LENGTH_1
+        goal_min = -time_steps
         goal_max = 0
         
     def goal(avg):
@@ -217,8 +206,7 @@ def train(
     action_size = env.action_space.n
     
     # Fix random seeds
-    _=env.seed(rs)
-    env.action_space.np_random.seed(rs)
+    env.reset(seed=rs)
     np.random.seed(rs)
     random.seed(rs) 
     torch.manual_seed(rs)
@@ -239,7 +227,9 @@ def train(
         elif d==3:
             text+=f'{int(x):03}'  
         elif d==4:
-            text+=f'{int(x):04}'  
+            text+=f'{int(x):04}' 
+        elif d==5:
+            text+=f'{int(x):05}' 
         return text
     
     def b2t(b,text='bl'):
@@ -250,7 +240,7 @@ def train(
      
     if name=='':
         folder_name = 'LA'+n2t(look_ahead)+b2t(baseline,'BL')+'-'+risk_objective+n2t(risk_beta*1000,4)+'-NN'+n2t(np.sum(nn_actor),3)+n2t(np.sum(nn_critic),3)+'/'+ \
-                'LR'+b2t(cut_lr,'CUT')+n2t(lr*10000,4)+'-Ao'+n2t(a_outer*100,2)+'-Ai'+n2t(a_inner*100,2)
+                'LR'+b2t(cut_lr,'CUT')+n2t(lr*100000,5)+'-Ao'+n2t(a_outer*100,2)+'-Ai'+n2t(a_inner*100,2)
         name=folder_name+'/'+'RS'+n2t(rs,2)
         os.makedirs(results_folder+'/'+folder_name, exist_ok=True)
     
@@ -496,7 +486,7 @@ def train(
             rewards = []
             
             # reset/observe current state
-            state = env.reset()
+            state,_ = env.reset()
             state = torch.FloatTensor(state).to(device)
             
             # repeat until failure and up to time_steps
@@ -508,7 +498,7 @@ def train(
                 action = policy.sample()
                 
                 # observe new state
-                new_state, reward, done, info = env.step(action.cpu().numpy())
+                new_state, reward, done, dumb, info = env.step(action.cpu().numpy())
                 new_state = torch.FloatTensor(new_state).to(device) 
 
                 # Update memory for RL model
@@ -561,13 +551,12 @@ def train(
     for ll in model_var:
         
         if game=='cartpole':
-            envl = gym.make('CartPoleExtraLong-v0').unwrapped
+            envl = gym.make('CartPole-v1')
             envl.length = actual_model_var + ll
         elif game=='acrobot':
-            envl = gym.make('AcrobotExtraLong-v0').unwrapped
+            envl = gym.make('Acrobot-v1')
             envl.LINK_LENGTH_1 = actual_model_var + ll
-        _=envl.seed(rs)
-        envl.action_space.np_random.seed(rs)
+        envl.reset(seed=rs)
     
         testing_all.append([])
         testing_avg.append([])
@@ -586,7 +575,7 @@ def train(
                 score = 0
                 
                 # reset/observe current state
-                state = envl.reset()
+                state,_ = envl.reset()
                 state = torch.FloatTensor(state).to(device)
                 
                 # repeat until failure and up to time_steps
@@ -597,7 +586,7 @@ def train(
                     action = policy.sample()
                     
                     # observe new state
-                    new_state, reward, done, info = envl.step(action.cpu().numpy())
+                    new_state, reward, done, dumb, info = envl.step(action.cpu().numpy())
                     new_state = torch.FloatTensor(new_state).to(device) 
                     score += reward
                     
