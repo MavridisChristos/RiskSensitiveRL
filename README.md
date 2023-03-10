@@ -158,4 +158,4 @@ Run
 If you use this work in an academic context, please cite the following:
 
 Erfaun Noorani, Christos N. Mavridis, John S. Baras,
-**Risk-Sensitive Policy-Gradient Reinforcement Learning with Exponential Criteria**, Artificial Intelligence (AIJ)
+**Risk-Sensitive Reinforcement Learning with Exponential Criteria** (arXiv:2212.09010)
