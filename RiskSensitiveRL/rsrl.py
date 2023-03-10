@@ -170,7 +170,7 @@ def train(
         gammaAC = 0.99,
         # Training Loops
         train_loops = 200,
-        test_loops = 50,
+        test_loops = 100,
         nepochs = 10,
         time_steps = 200, 
         # Neural Networks and Learning Rate
