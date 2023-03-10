@@ -119,8 +119,10 @@ plt.close('all')
     # Learning rate for Adam optimizer
     # Very important parameter for convergence: high sensitivity  
 
-- cut_lr = False
-    # mannually decrease learning rate if desired average score is reached
+- cut_lr = 0
+    # 0: stop learning if steady rewards for a long time
+    # 1: mannually decrease learning rate if desired average score is reached
+    # -1: don't stop learning
     # (developer mode)
 
 - a_inner = 0.0 
@@ -177,11 +179,11 @@ def train(
         lr = 0.0007,
         a_outer = 0.0,
         a_inner = 0.0, 
-        cut_lr=False,
+        cut_lr=0,
         # Model Variations
         model_var = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3],
         verbose = 1,
-        rs=0):
+        rs=42):
 
     #%% Environment Initialization and Random Seeds
     
@@ -352,6 +354,9 @@ def train(
             a= lr * 1/(1 + n*a_inner)
         return a
     
+    stop_learning = False
+    stop_learning_loops = max(int(train_loops*0.1),20)
+    stop_learning_sensitivity = int(np.abs(goal_max-goal_min)*0.02)
     actor = Actor(state_size, action_size, nn_actor)
     critic = Critic(state_size, action_size, nn_critic)    
     a_optimizer = optim.Adam(actor.parameters(),lr=lr,maximize=False)
@@ -509,7 +514,7 @@ def train(
                 score+= reward
 
                 # Batch or Online Update
-                if t>=0 and look_ahead>0 and t%look_ahead==0:
+                if t>=0 and look_ahead>0 and t%look_ahead==0 and (not stop_learning):
                     update_actor_critic(new_state, rewards, values, log_probs, stepsize(lr,int((t+1)/look_ahead)), baseline,t,done)
                     log_probs = []
                     values = []
@@ -520,7 +525,7 @@ def train(
                 if done:
                     break
 
-            if len(rewards)>0 and look_ahead>0:
+            if len(rewards)>0 and look_ahead>0 and (not stop_learning):
                 update_actor_critic(new_state, rewards, values, log_probs, stepsize(lr,int((t+1)/look_ahead)), baseline,t,done)
             elif len(rewards)>0 and look_ahead==0:
                 update_reinforce(new_state, rewards, values, log_probs, stepsize(lr,0), baseline)
@@ -533,12 +538,17 @@ def train(
             else:
                 std2 = (i-1)/i * std2 + 1/(i+1) * (score - avg)**2             
             
-        if cut_lr and goal(avg):
-            lr = 0.1*lr
+        if cut_lr==1 and goal(avg):
+            lr = 0.01*lr
             
         # Compute Average number of timesteps
         training_avg.append(avg)
         training_std.append(np.sqrt(std2))
+        if cut_lr==0 and len(training_avg)>int(stop_learning_loops*3) and np.abs(np.max(np.array(training_avg[-stop_learning_loops:])-
+                  np.min(training_avg[-stop_learning_loops:])) < stop_learning_sensitivity):
+            if stop_learning==False and verbose>0:
+                print('*** Stopped Learning ***')
+            stop_learning = True
         if verbose>0:
             print(f'{(k+1)*nepochs}: Training Average: {avg:.2f} +- {np.sqrt(std2):.2f}')
     
