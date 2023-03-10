@@ -20,55 +20,6 @@ learning_rates = [0.00005,0.00008, 0.0001,0.0003,0.0005,0.00007,0.001]
 b = 0
 random_seeds = [b+0,b+1,b+2,b+3,b+4,b+5,b+6,b+7,b+8,b+9]
  
-#%% 
-
-def run_all_seeds(
-                name, 
-                game,
-                look_ahead,
-                baseline,
-                risk_beta,
-                risk_objective, 
-                gammaAC,
-                train_loops,
-                test_loops,
-                nepochs,
-                time_steps, 
-                nn_actor,
-                nn_critic,
-                lr,
-                a_outer,
-                a_inner, 
-                cut_lr,
-                model_var,
-                verbose,
-                rs):
-    
-    for rs in random_seeds:
-        
-        train(
-            name, 
-            game,
-            look_ahead,
-            baseline,
-            risk_beta,
-            risk_objective, 
-            gammaAC,
-            train_loops,
-            test_loops,
-            nepochs,
-            time_steps, 
-            nn_actor,
-            nn_critic,
-            lr,
-            a_outer,
-            a_inner, 
-            cut_lr,
-            model_var,
-            verbose,
-            rs
-            )
-
 #%% Main
 
 if __name__ == "__main__":
@@ -103,7 +54,8 @@ if __name__ == "__main__":
     p=[]
     for risk_beta in risk_betas:
         for lr in learning_rates:
-            p.append(multiprocessing.Process(target=run_all_seeds, args=(
+            for rs in random_seeds:
+                p.append(multiprocessing.Process(target=train, args=(
                                                                     name, 
                                                                     game,
                                                                     look_ahead,
@@ -125,10 +77,10 @@ if __name__ == "__main__":
                                                                     verbose,
                                                                     rs
                                                                     )
-                                            )
-                    )
-            p[-1].start()
-            print(f'Process #{len(p)} started.')
+                                                )
+                        )
+                p[-1].start()
+                print(f'Process #{len(p)} started.')
     
     # for pp in p:
     #     pp.join()
