@@ -244,7 +244,7 @@ def train(
      
     if name=='':
         folder_name = 'LA'+n2t(look_ahead)+b2t(baseline,'BL')+'-'+risk_objective+n2t(risk_beta*1000,4)+'-NN'+n2t(np.sum(nn_actor),3)+n2t(np.sum(nn_critic),3)+'/'+ \
-                'LR'+b2t(cut_lr,'CUT')+n2t(lr*100000,5)+'-Ao'+n2t(a_outer*100,2)+'-Ai'+n2t(a_inner*100,2)
+                'LR'+n2t(lr*100000,5)+'-CUT'+n2t(cut_lr,1)+'-Ao'+n2t(a_outer*100,2)+'-Ai'+n2t(a_inner*100,2)
         name=folder_name+'/'+'RS'+n2t(rs,2)
         os.makedirs(results_folder+'/'+folder_name, exist_ok=True)
     
@@ -546,17 +546,21 @@ def train(
             else:
                 std2 = (i-1)/i * std2 + 1/(i+1) * (score - avg)**2             
             
-        if cut_lr==1 and goal(avg):
-            lr = 0.01*lr
-            
         # Compute Average number of timesteps
         training_avg.append(avg)
         training_std.append(np.sqrt(std2))
-        if cut_lr==0 and len(training_avg)>int(stop_learning_loops*3) and np.abs(np.max(np.array(training_avg[-stop_learning_loops:])-
+        
+        if cut_lr>=0 and len(training_avg)>int(stop_learning_loops*3) and np.abs(np.max(np.array(training_avg[-stop_learning_loops:])-
                   np.min(training_avg[-stop_learning_loops:])) < stop_learning_sensitivity):
             if stop_learning==False and verbose>0:
                 print('*** Stopped Learning ***')
             stop_learning = True
+        if cut_lr==1 and len(training_avg)>int(stop_learning_loops) and np.all([goal(aa) for aa in training_avg[-int(stop_learning_loops/2):]]):
+            # lr = 0.01*lr
+            if stop_learning==False and verbose>0:
+                print('*** Stopped Learning ***')
+            stop_learning = True
+            
         if verbose>0:
             print(f'{(k+1)*nepochs}: Training Average: {avg:.2f} +- {np.sqrt(std2):.2f}')
     
