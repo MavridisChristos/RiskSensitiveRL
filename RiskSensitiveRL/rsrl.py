@@ -165,7 +165,7 @@ def train(
         look_ahead = 1,
         baseline = False,
         # Risk-Sensitivity
-        risk_beta = -0.01,
+        risk_beta = -0.001,
         risk_objective = 'BETA', 
         gammaAC = 0.99,
         # Training Loops
@@ -183,7 +183,7 @@ def train(
         # Model Variations
         model_var = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3],
         verbose = 1,
-        rs=42):
+        rs=0):
 
     #%% Environment Initialization and Random Seeds
     
@@ -192,11 +192,13 @@ def train(
         actual_model_var = env.length
         goal_min = 0
         goal_max = time_steps
+        reward_sign = 1
     elif game=='acrobot':
         env = gym.make('Acrobot-v1')
         actual_model_var = env.LINK_LENGTH_1
         goal_min = -time_steps
         goal_max = 0
+        reward_sign = -1
         
     def goal(avg):
         if game=='cartpole':
@@ -386,20 +388,26 @@ def train(
                 # advantage_actor = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value))) - values
                 # advantage_actor = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value)) + \
                 #                         np.log(np.abs(risk_beta))*(1-gammaAC)) - risk_beta*values
-                advantage_actor = advantage_critic * np.abs(risk_beta)
+                if reward_sign<0 and risk_beta<0:
+                    advantage_actor = -advantage_critic * np.abs(risk_beta)
+                else:
+                    advantage_actor = advantage_critic * np.abs(risk_beta)
             elif risk_objective=='BETAI':
                 advantage_critic = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value))) - values
                 # advantage_actor = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value))) - values
                 # advantage_actor = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value)) + \
                 #                         np.log(np.abs(risk_beta))*(gammaAC-1)) - 1/risk_beta*values
-                advantage_actor = advantage_critic * 1/np.abs(risk_beta)
+                if reward_sign<0 and risk_beta<0:
+                    advantage_actor = -advantage_critic * 1/np.abs(risk_beta)
+                else:
+                    advantage_actor = advantage_critic * 1/np.abs(risk_beta)
             elif risk_objective=='BETAS':
                 advantage_critic = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value))) - values
                 # advantage_actor = torch.exp(risk_beta * returns + gammaAC * torch.log(1e-15+torch.relu(new_value))) - values
-                advantage_actor = advantage_critic
-            else:
-                advantage_critic = (returns + gammaAC * new_value) - values
-                advantage_actor = (returns + gammaAC * new_value) - values
+                if reward_sign<0 and risk_beta<0:
+                    advantage_actor = -advantage_critic
+                else:
+                    advantage_actor = advantage_critic 
         else:
             advantage_critic = (returns + gammaAC * new_value) - values
             advantage_actor = (returns + gammaAC * new_value) - values
@@ -561,10 +569,10 @@ def train(
     for ll in model_var:
         
         if game=='cartpole':
-            envl = gym.make('CartPole-v1')
+            envl = gym.make('CartPole-v1').unwrapped
             envl.length = actual_model_var + ll
         elif game=='acrobot':
-            envl = gym.make('Acrobot-v1')
+            envl = gym.make('Acrobot-v1').unwrapped
             envl.LINK_LENGTH_1 = actual_model_var + ll
         envl.reset(seed=rs)
     

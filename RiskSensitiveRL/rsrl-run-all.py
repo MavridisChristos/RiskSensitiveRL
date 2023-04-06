@@ -16,7 +16,7 @@ import multiprocessing
 #%% Hyper parameters
 
 risk_betas = [0,0.001,-0.001,0.005,-0.005,0.01,-0.01,0.05,-0.05]
-learning_rates = [0.00005,0.00008, 0.0001,0.0003,0.0005,0.00007,0.001]
+learning_rates = [0.00005,0.00008, 0.0001,0.0003,0.0005,0.0007,0.001]
 b = 0
 random_seeds = [b+0,b+1,b+2,b+3,b+4,b+5,b+6,b+7,b+8,b+9]
  
