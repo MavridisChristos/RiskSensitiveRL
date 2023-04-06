@@ -21,7 +21,7 @@ game = 'cartpole'
 look_ahead = 1
 baseline = False
 risk_objective = 'BETA' 
-train_loops = 400
+train_loops = 200
 test_loops = 100
 nepochs = 10
 time_steps = 200 
@@ -31,20 +31,24 @@ a_outer = 0.0
 a_inner = 0.0 
 cut_lr=0
 model_var = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3]
-test_var = [0.0]
-# test_var = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3]
+# test_var = [0.0]
+test_var = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3]
 
 actual_model_var = 0.5
 goal_max = 200
 goal_min = 0
 
-# risk_betas = [0,0.001,-0.001,0.005,-0.005,0.01,-0.01,0.05,-0.05,0.1,-0.1]
-risk_betas = [0]
-# learning_rates = [0.00005,0.00008, 0.0001,0.0003,0.0005,0.00007,0.001]
+risk_betas = [0,0.001,-0.001,0.005,-0.005,0.01,-0.01]
+risk_betas = [0,0.01,-0.01,0.05,-0.05,0.1,-0.1]
+risk_betas = [-0.001]
+
+learning_rates = [0.0003,0.0005, 0.0007,0.001]
+learning_rates = [0.003,0.005, 0.007,0.01]
 learning_rates = [0.0003]
+
 b = 0
-random_seeds = [b+0,b+1,b+2,b+4,b+5,b+6,b+7,b+8,b+9]
-# random_seeds = [b+0]
+random_seeds = [b+0,b+1,b+2,b+3,b+4,b+5,b+6,b+7,b+8,b+9]
+random_seeds = [b+0]
 
 batch = 25
 p = 0.1
@@ -148,7 +152,7 @@ for risk_beta in risk_betas:
         pxmax = 3250
         pymin = -20
         pymax = 220
-        plt.xlim([-150, 6750])
+        plt.xlim([-150, 3350])
         plt.ylim([-20, 220])
         
         # random seed average    
@@ -268,18 +272,31 @@ for risk_beta in risk_betas:
                 
                 if model_var[ll] == 0:
                 # if True:
-                    color = colors[3]
+                    color = tcolors[ll]
                     xx = len(training_all) + len(testing_all)
                     yy = testing_all_cvar
                     plt.plot(xx,yy,label = f'CVaR$_{ {p} }={yy:.2f}$',color=color,linewidth=2,alpha=0.7,marker='.',markersize=5)
+                    # plt.plot(xx,yy,color=color,linewidth=2,alpha=0.7,marker='_',markersize=75)
+                    # plt.text(xx-0,yy-10,f'CVaR$_{ {p} }$',color=color, fontsize = 10, fontweight='bold')
+                    plt.text(xx+100,yy-10,f'CVaR$_{ {p} }$',color=color,horizontalalignment='center',verticalalignment='center',fontsize=10,fontweight='bold',
+                              bbox=dict(boxstyle="round",
+                                    fc=(1., 1., 1.),
+                                    ec=(.1, .1, .1),alpha=0.5
+                                    ),alpha=0.99)    
                     plt.plot(xx,yy,color=color,linewidth=2,alpha=0.7,marker='_',markersize=75)
-                    plt.text(xx-0,yy-10,f'CVaR$_{ {p} }$',color=color, fontsize = 10, fontweight='bold')
-                    color = colors[5]
+                    
+                    color = tcolors[ll]
                     yy = testing_all_cvar9
                     plt.plot(xx,yy,label = f'CVaR$_{ {1-p} }={yy:.2f}$',color=color,linewidth=2,alpha=0.7,marker='.',markersize=5)
+                    # plt.plot(xx,yy,color=color,linewidth=2,alpha=0.7,marker='_',markersize=75)
+                    # plt.text(xx-0,yy+5,f'CVaR$_{ {1-p} }$',color=color, fontsize = 10, fontweight='bold')
+                    plt.text(xx+100,yy+9,f'CVaR$_{ {1-p} }$',color=color,horizontalalignment='center',verticalalignment='center',fontsize=10,fontweight='bold',
+                              bbox=dict(boxstyle="round",
+                                    fc=(1., 1., 1.),
+                                    ec=(.1, .1, .1),alpha=0.5
+                                    ),alpha=0.99)    
                     plt.plot(xx,yy,color=color,linewidth=2,alpha=0.7,marker='_',markersize=75)
-                    plt.text(xx-0,yy+5,f'CVaR$_{ {1-p} }$',color=color, fontsize = 10, fontweight='bold')
-            
+                    
         plt.fill_between([x[0],x[-1]],[goal_max+10,goal_max+10],[goal_min-15,goal_min-15],alpha=0.03,color='r')
         # plt.fill_between([2000,pxmax],[pymax,pymax],[pymin,pymin],alpha=0.03,color='r')
         
@@ -287,17 +304,18 @@ for risk_beta in risk_betas:
         plt.text(tp-0.17,.05, 'Training Phase', horizontalalignment='center',verticalalignment='center', fontsize=12,#fontweight='bold',
                   transform = ax.transAxes,bbox=dict(boxstyle="round",
                         fc=(1., 1.0, 1.0),
-                        ec=(0.1, .1, .1),alpha=0.01
+                        ec=(0.1, .1, .1),alpha=0.1
                         ),alpha=0.7)    
         
         plt.text(tp+0.06,.05, 'Testing Phase', horizontalalignment='center',verticalalignment='center', fontsize=12,#fontweight='bold',
                   transform = ax.transAxes,bbox=dict(boxstyle="round",
                         fc=(1., 1.0, 1.0),
-                        ec=(0.1, .1, .1),alpha=0.01
+                        ec=(0.1, .1, .1),alpha=0.1
                         ),alpha=0.7)
         
         plt.grid(color='gray', linestyle='-', linewidth=1, alpha = 0.1)
-        plt.legend(loc='upper left',prop={'size': 14},framealpha=0.51, borderpad=1) #loc='upper left',
+        # plt.legend(loc='lower left',prop={'size': 14},framealpha=0.51, borderpad=1) #loc='upper left',
+        plt.legend(prop={'size': 14},framealpha=0.51, borderpad=1) #loc='upper left',
 
         plt.xlabel('# Episodes', fontsize = 20)
         plt.ylabel('Reward', fontsize = 20)
