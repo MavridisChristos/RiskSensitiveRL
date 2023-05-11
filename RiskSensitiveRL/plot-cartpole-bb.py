@@ -31,7 +31,7 @@ a_outer = 0.0
 a_inner = 0.0 
 cut_lr=0
 model_var = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3]
-test_var = [0.0]
+test_var = [-0.2]
 
 actual_model_var = 0.5
 goal_max = 200
@@ -42,8 +42,8 @@ risk_betas = [0,0.001,-0.001,0.005,-0.005,0.01,-0.01]
 # risk_betas = [-0.001]
 
 learning_rates = [0.0003,0.0005, 0.0007,0.001]
-learning_rates = [0.003,0.005, 0.007,0.01]
-learning_rates = [0.0003]
+# learning_rates = [0.003,0.005, 0.007,0.01]
+# learning_rates = [0.0003]
 
 b = 0
 random_seeds = [b+0,b+1,b+2,b+3,b+4,b+5,b+6,b+7,b+8,b+9]
@@ -91,9 +91,7 @@ def filename(game,
             rs):
     
     folder_name = 'LA'+n2t(look_ahead)+b2t(baseline,'BL')+'-'+risk_objective+n2t(risk_beta*1000,4)+'-NN'+n2t(np.sum(nn_actor),3)+n2t(np.sum(nn_critic),3)+'/'+ \
-            'LR'+b2t(cut_lr,'CUT')+n2t(lr*100000,5)+'-Ao'+n2t(a_outer*100,2)+'-Ai'+n2t(a_inner*100,2)
-    # folder_name = 'LA'+n2t(look_ahead)+b2t(baseline,'BL')+'-'+risk_objective+n2t(risk_beta*1000,4)+'-NN'+n2t(np.sum(nn_actor),3)+n2t(np.sum(nn_critic),3)+'/'+ \
-    #         'LR'+n2t(lr*100000,5)+'-CUT'+n2t(cut_lr,1)+'-Ao'+n2t(a_outer*100,2)+'-Ai'+n2t(a_inner*100,2)
+            'LR'+n2t(lr*100000,5)+'-CUT'+n2t(cut_lr,1)+'-Ao'+n2t(a_outer*100,2)+'-Ai'+n2t(a_inner*100,2)
     name=folder_name+'/'+'RS'+n2t(rs,2)
     
     return name, folder_name
@@ -136,8 +134,8 @@ for risk_beta in risk_betas:
             file = '../results/'+game+'/'+file+'.pkl'
             if not os.path.isfile(file):
                 no_file = True
-                print('No File '+file)
-                break
+                # print('No File '+file)
+                continue
                 
             with open(file, mode='rb') as file:
                 training_all,testing_all, wa, wc = pickle.load(file)
@@ -145,7 +143,8 @@ for risk_beta in risk_betas:
             testing_data.append(testing_all)
             
         if no_file:
-            break
+            if testing_data ==[]:
+                continue
 
         for ll in range(len(testing_data[0])):
             
@@ -212,14 +211,20 @@ for idy,yy in enumerate(y):
     plt.plot(x,yy,label=f'{bnames[idy]}',color=color,alpha=0.7, 
                   marker=marker, markersize = bmarkers[idy],linestyle=blines[idy]) 
 plt.fill_between(x,y[0],y[1],alpha=0.1,color=bcolors[0])
-            
+    
+plt.text(0.88,0.1, r'$\Delta l=$'+f'{test_var[0]}',color=colors[7],horizontalalignment='center',verticalalignment='center', fontsize=12,#fontweight='bold',
+          transform = ax.transAxes,bbox=dict(boxstyle="round",
+                fc=(1., 1.0, 1.0),
+                ec=(0.1, .1, .1),alpha=0.7
+                ),alpha=0.9)    
+        
 plt.grid(color='gray', linestyle='-', linewidth=1, alpha = 0.1)
 plt.legend(prop={'size': 14},framealpha=0.51, borderpad=1)
 
 plt.xlabel(r'$\beta$', fontsize = 22)
 plt.ylabel('Reward', fontsize = 22)
 
-plot_file = '../results/'+game+'/'+name+'-'+n2t(look_ahead,1)+'.png'
+plot_file = '../results/'+game+'/'+name+'-'+n2t(look_ahead,1)+'-ll'+n2t(test_var[0]*10,2)+'.png'
 fig.savefig(plot_file, format = 'png')  
 plt.show()
 plt.close()

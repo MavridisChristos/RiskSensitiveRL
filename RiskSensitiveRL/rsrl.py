@@ -165,7 +165,7 @@ def train(
         look_ahead = 1,
         baseline = False,
         # Risk-Sensitivity
-        risk_beta = -0.001,
+        risk_beta = 0.001,
         risk_objective = 'BETA', 
         gammaAC = 0.99,
         # Training Loops
@@ -181,7 +181,7 @@ def train(
         a_inner = 0.0, 
         cut_lr=0,
         # Model Variations
-        model_var = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3],
+        model_var = [0.0, 0.8], # [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3],
         verbose = 1,
         rs=0):
 

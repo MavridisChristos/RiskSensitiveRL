@@ -18,7 +18,7 @@ plt.close('all')
 
 name='jair-tt'
 game = 'cartpole'
-look_ahead = 1
+look_ahead = 0
 baseline = False
 risk_objective = 'BETA' 
 train_loops = 200
@@ -38,17 +38,19 @@ actual_model_var = 0.5
 goal_max = 200
 goal_min = 0
 
-risk_betas = [0,0.001,-0.001,0.005,-0.005,0.01,-0.01]
+# risk_betas = [0,0.001,-0.001,0.005,-0.005,0.01,-0.01]
 risk_betas = [0,0.01,-0.01,0.05,-0.05,0.1,-0.1]
-risk_betas = [-0.001]
+risk_betas = [-0.01]
 
-learning_rates = [0.0003,0.0005, 0.0007,0.001]
+# learning_rates = [0.0003,0.0005, 0.0007,0.001]
 learning_rates = [0.003,0.005, 0.007,0.01]
-learning_rates = [0.0003]
+# learning_rates = [0.0003]
 
 b = 0
 random_seeds = [b+0,b+1,b+2,b+3,b+4,b+5,b+6,b+7,b+8,b+9]
-random_seeds = [b+0]
+# random_seeds = [b+0,b+1,b+2,b+4,b+5,b+6,b+7,b+8,b+9]
+# random_seeds = [b+1,b+2,b+4,b+5,b+6,b+7]
+# random_seeds = [b+0]
 
 batch = 25
 p = 0.1
@@ -90,11 +92,9 @@ def filename(game,
             a_inner, 
             cut_lr,
             rs):
-    
+
     folder_name = 'LA'+n2t(look_ahead)+b2t(baseline,'BL')+'-'+risk_objective+n2t(risk_beta*1000,4)+'-NN'+n2t(np.sum(nn_actor),3)+n2t(np.sum(nn_critic),3)+'/'+ \
-            'LR'+b2t(cut_lr,'CUT')+n2t(lr*100000,5)+'-Ao'+n2t(a_outer*100,2)+'-Ai'+n2t(a_inner*100,2)
-    # folder_name = 'LA'+n2t(look_ahead)+b2t(baseline,'BL')+'-'+risk_objective+n2t(risk_beta*1000,4)+'-NN'+n2t(np.sum(nn_actor),3)+n2t(np.sum(nn_critic),3)+'/'+ \
-    #         'LR'+n2t(lr*100000,5)+'-CUT'+n2t(cut_lr,1)+'-Ao'+n2t(a_outer*100,2)+'-Ai'+n2t(a_inner*100,2)
+            'LR'+n2t(lr*100000,5)+'-CUT'+n2t(cut_lr,1)+'-Ao'+n2t(a_outer*100,2)+'-Ai'+n2t(a_inner*100,2)
     name=folder_name+'/'+'RS'+n2t(rs,2)
     
     return name, folder_name
@@ -130,7 +130,7 @@ for risk_beta in risk_betas:
             file = '../results/'+game+'/'+file+'.pkl'
             if not os.path.isfile(file):
                 no_file = True
-                break
+                continue
                 
             with open(file, mode='rb') as file:
                 training_all,testing_all, wa, wc = pickle.load(file)
@@ -141,7 +141,8 @@ for risk_beta in risk_betas:
             wc_data.append(wc)
         
         if no_file:
-            break
+            if traning_data ==[]:
+                continue
 
         fig,ax = plt.subplots(facecolor='white',figsize=(7,5),tight_layout = {'pad': 1})
         ax.tick_params(axis='both', which='major', labelsize=12)
@@ -314,8 +315,8 @@ for risk_beta in risk_betas:
                         ),alpha=0.7)
         
         plt.grid(color='gray', linestyle='-', linewidth=1, alpha = 0.1)
-        # plt.legend(loc='lower left',prop={'size': 14},framealpha=0.51, borderpad=1) #loc='upper left',
-        plt.legend(prop={'size': 14},framealpha=0.51, borderpad=1) #loc='upper left',
+        plt.legend(loc='lower left',prop={'size': 14},framealpha=0.51, borderpad=1) #loc='upper left',
+        # plt.legend(prop={'size': 14},framealpha=0.51, borderpad=1) #loc='upper left',
 
         plt.xlabel('# Episodes', fontsize = 20)
         plt.ylabel('Reward', fontsize = 20)
